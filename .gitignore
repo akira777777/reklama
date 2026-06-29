@@ -1,0 +1,25 @@
+# Секреты и сессии
+.env
+*.session
+*.session-journal
+
+# Данные запусков
+progress.json
+logs/
+!logs/.gitkeep
+
+# Медиа (кладётся пользователем вручную)
+media/*
+!media/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
