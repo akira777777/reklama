@@ -129,6 +129,8 @@ async def run() -> None:
         progress.reset()
 
     text = read_message()
+    text, entities = emoji.parse_custom_emoji(text)
+    formatting_entities = entities if entities else None
     media = config.resolve_media_path()
     if media:
         log.info("Медиа: %s (вид: %s)", media, sender.detect_media_kind(media))
@@ -173,7 +175,9 @@ async def run() -> None:
 
             await ensure_active(window)
             log.info("[%d/%d] Отправка в: %s (id=%d)", i + 1, total, _clean(title), eid)
-            result: SendResult = await sender.send(client, entity, text, media)
+            result: SendResult = await sender.send(
+                client, entity, text, media, formatting_entities=formatting_entities
+            )
 
             if result.ok:
                 await _record(state, eid, progress.STATUS_SENT, "")
