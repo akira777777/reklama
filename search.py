@@ -9,6 +9,7 @@ import argparse
 import asyncio
 import logging
 import random
+import re
 
 from telethon import functions
 from telethon.errors import ChannelsTooMuchError, FloodWaitError, UsersTooMuchError
@@ -29,21 +30,33 @@ def parse_args() -> argparse.Namespace:
         "-q",
         "--query",
         type=str,
-        required=True,
-        help="Ключевое слово для поиска.",
+        help="Ключевое слово для поиска в Telegram.",
+    )
+    p.add_argument(
+        "-f",
+        "--file",
+        type=str,
+        help="Путь к файлу со ссылками или юзернеймами (по одной строке на группу).",
+    )
+    p.add_argument(
+        "-ls",
+        "--links",
+        type=str,
+        nargs="+",
+        help="Список ссылок или юзернеймов групп через пробел.",
     )
     p.add_argument(
         "-l",
         "--limit",
         type=int,
         default=20,
-        help="Ограничение количества результатов (по умолчанию: 20).",
+        help="Ограничение количества результатов глобального поиска (по умолчанию: 20).",
     )
     p.add_argument(
         "-j",
         "--join",
         action="store_true",
-        help="Автоматически вступать во все найденные группы.",
+        help="Автоматически вступать во все найденные/указанные группы.",
     )
     p.add_argument(
         "--delay-min",
@@ -57,7 +70,10 @@ def parse_args() -> argparse.Namespace:
         default=30,
         help="Максимальная задержка между вступлениями в секундах (по умолчанию: 30).",
     )
-    return p.parse_args()
+    args = p.parse_args()
+    if not (args.query or args.file or args.links):
+        p.error("Необходимо указать хотя бы один источник: --query, --file или --links")
+    return args
 
 
 def is_search_group(entity: tl.TypeChat) -> bool:
@@ -76,6 +92,121 @@ def is_search_group(entity: tl.TypeChat) -> bool:
     return False
 
 
+def parse_telegram_link(link: str) -> tuple[str, str] | None:
+    """Разбирает ссылку/юзернейм Telegram.
+
+    Возвращает:
+      - ('hash', hash_str) для инвайт-ссылок
+      - ('username', username_str) для публичных групп/юзернеймов
+      - None, если не удалось распознать.
+    """
+    link = link.strip()
+    if not link:
+        return None
+    # Удаляем протоколы, домены и т.д.
+    s = re.sub(r"^(https?://)?(www\.)?(t\.me|telegram\.me|telegram\.dog)/", "", link, flags=re.IGNORECASE)
+    if not s:
+        return None
+
+    if s.startswith("+"):
+        invite_hash = s[1:]
+        return ("hash", invite_hash) if invite_hash else None
+
+    if s.startswith("joinchat/"):
+        invite_hash = s[len("joinchat/"):]
+        return ("hash", invite_hash) if invite_hash else None
+
+    if s.startswith("@"):
+        s = s[1:]
+
+    # Регулярное выражение для валидного юзернейма
+    if re.match(r"^[a-zA-Z0-9_]+$", s):
+        return ("username", s)
+
+    return None
+
+
+async def verify_link(client, link: str, joined_ids: set[int]) -> dict | None:  # noqa: ANN001
+    """Проверяет ссылку/юзернейм перед вступлением.
+
+    Возвращает словарь с метаданными о группе или None, если группа не подходит.
+    """
+    parsed = parse_telegram_link(link)
+    if not parsed:
+        return {"link": link, "valid": False, "error": "Неверный формат ссылки"}
+
+    ltype, lval = parsed
+
+    if ltype == "username":
+        try:
+            entity = await client.get_entity(lval)
+            if not is_search_group(entity):
+                return {
+                    "link": link,
+                    "valid": False,
+                    "error": "Сущность не является группой или супергруппой (возможно, это канал-трансляция или пользователь)",
+                }
+
+            joined = entity.id in joined_ids
+            title = getattr(entity, "title", "Без названия")
+            return {
+                "link": link,
+                "type": "username",
+                "value": lval,
+                "title": title,
+                "entity": entity,
+                "joined": joined,
+                "valid": True,
+            }
+        except Exception as e:
+            return {"link": link, "valid": False, "error": f"Не удалось получить информацию о юзернейме: {e}"}
+
+    elif ltype == "hash":
+        try:
+            from telethon.tl.functions.messages import CheckChatInviteRequest
+            from telethon.tl.types import ChatInvite, ChatInviteAlready
+
+            invite = await client(CheckChatInviteRequest(hash=lval))
+
+            if isinstance(invite, ChatInviteAlready):
+                chat = invite.chat
+                title = getattr(chat, "title", "Без названия")
+                return {
+                    "link": link,
+                    "type": "hash",
+                    "value": lval,
+                    "title": title,
+                    "entity": chat,
+                    "joined": True,
+                    "valid": True,
+                }
+            elif isinstance(invite, ChatInvite):
+                title = invite.title
+                is_broadcast = bool(getattr(invite, "broadcast", False))
+                is_megagroup = bool(getattr(invite, "megagroup", False))
+
+                if is_broadcast and not is_megagroup:
+                    return {
+                        "link": link,
+                        "valid": False,
+                        "error": "Ссылка ведет на односторонний канал-трансляцию (писать сообщения нельзя)",
+                    }
+
+                return {
+                    "link": link,
+                    "type": "hash",
+                    "value": lval,
+                    "title": title,
+                    "entity": None,
+                    "joined": False,
+                    "valid": True,
+                }
+        except Exception as e:
+            return {"link": link, "valid": False, "error": f"Не удалось проверить пригласительную ссылку: {e}"}
+
+    return None
+
+
 async def _run_search(client, args: argparse.Namespace) -> None:  # noqa: ANN001
     """Основная логика поиска и вступления в группы."""
     # 1. Получаем список диалогов, в которых мы уже состоим
@@ -84,119 +215,169 @@ async def _run_search(client, args: argparse.Namespace) -> None:  # noqa: ANN001
     joined_ids = {d.id for d in dialogs}
     log.info("Вы состоите в %d диалогах.", len(joined_ids))
 
-    # 2. Выполняем глобальный поиск
-    result = await client(
-        functions.contacts.SearchRequest(
-            q=args.query,
-            limit=args.limit,
-        )
-    )
+    # 2. Собираем список групп для вступления/проверки
+    targets: list[dict] = []
 
-    found_groups = [chat for chat in result.chats if is_search_group(chat)]
+    # 2а. Обрабатываем --query (глобальный поиск)
+    if args.query:
+        log.info("Выполняем глобальный поиск по запросу: '%s'...", args.query)
+        try:
+            result = await client(
+                functions.contacts.SearchRequest(
+                    q=args.query,
+                    limit=args.limit,
+                )
+            )
+            found_groups = [chat for chat in result.chats if is_search_group(chat)]
+            for group in found_groups:
+                username = getattr(group, "username", None)
+                identifier = f"@{username}" if username else f"id={group.id}"
+                targets.append({
+                    "type": "search_entity",
+                    "link_or_id": identifier,
+                    "title": getattr(group, "title", "Без названия"),
+                    "entity": group,
+                    "hash": None,
+                    "joined": group.id in joined_ids,
+                    "valid": True,
+                    "error": None,
+                })
+        except Exception as e:
+            log.error("Ошибка при выполнении глобального поиска: %s", e)
 
-    log.info("Всего найдено подходящих групп: %d.", len(found_groups))
-    if not found_groups:
-        log.info("Групп по запросу не найдено.")
+    # 2б. Собираем ссылки из --file и --links
+    raw_links: list[str] = []
+    if args.file:
+        log.info("Чтение ссылок из файла: %s...", args.file)
+        try:
+            with open(args.file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line_clean = line.strip()
+                    if line_clean and not line_clean.startswith("#"):
+                        raw_links.append(line_clean)
+        except Exception as e:
+            log.error("Не удалось прочитать файл %s: %s", args.file, e)
+
+    if args.links:
+        raw_links.extend(args.links)
+
+    # Удаляем дубликаты исходных ссылок
+    seen_links = set()
+    unique_raw_links = []
+    for link in raw_links:
+        if link not in seen_links:
+            seen_links.add(link)
+            unique_raw_links.append(link)
+
+    if unique_raw_links:
+        log.info("Проверяем ссылки (всего уникальных: %d)...", len(unique_raw_links))
+        for idx, link in enumerate(unique_raw_links, start=1):
+            log.info("[%d/%d] Проверка '%s'...", idx, len(unique_raw_links), link)
+            res = await verify_link(client, link, joined_ids)
+            if res:
+                if res.get("valid"):
+                    targets.append({
+                        "type": res["type"],
+                        "link_or_id": link,
+                        "title": res["title"],
+                        "entity": res.get("entity"),
+                        "hash": res["value"] if res["type"] == "hash" else None,
+                        "joined": res["joined"],
+                        "valid": True,
+                        "error": None,
+                    })
+                    status_str = "[состоите]" if res["joined"] else "[не состоите]"
+                    log.info("  -> Успешно проверено: '%s' (%s)", res["title"], status_str)
+                else:
+                    log.warning("  -> Не подходит: %s", res.get("error", "Неизвестная ошибка"))
+
+    # Отчет по найденным/проверенным группам
+    log.info("Всего подходящих групп найдено/проверено: %d", len(targets))
+    if not targets:
+        log.info("Нет подходящих групп для обработки.")
         return
 
-    for idx, group in enumerate(found_groups, start=1):
-        username = getattr(group, "username", None)
-        username_str = f"@{username}" if username else "нет username"
-        participants = getattr(group, "participants_count", None)
-        part_str = (
-            f"{participants} уч."
-            if participants is not None
-            else "кол-во участников неизвестно"
-        )
-        status = "[состоите]" if group.id in joined_ids else "[не состоите]"
-        log.info(
-            "%d. %s (id=%d, %s, %s, %s)",
-            idx,
-            clean_control_chars(group.title),
-            group.id,
-            username_str,
-            part_str,
-            status,
-        )
+    # Выводим список
+    log.info("Список групп:")
+    for idx, t in enumerate(targets, start=1):
+        status = "[состоите]" if t["joined"] else "[не состоите]"
+        log.info("%d. %s (%s, %s)", idx, clean_control_chars(t["title"]), t["link_or_id"], status)
 
     if not args.join:
-        log.info(
-            "Режим вступления отключен. Для автоматического вступления запустите с флагом --join"
-        )
+        log.info("Режим вступления отключен. Для автоматического вступления запустите с флагом --join")
         return
 
-    # 3. Вступаем в группы, в которых еще не состоим
-    to_join = [g for g in found_groups if g.id not in joined_ids]
+    # Отбираем только те, в которых мы не состоим
+    to_join = [t for t in targets if not t["joined"]]
     if not to_join:
-        log.info("Вы уже состоите во всех найденных группах.")
+        log.info("Вы уже состоите во всех подходящих группах.")
         return
 
     log.info("Начинаем вступление в группы (всего к вступлению: %d)...", len(to_join))
     joined_count = 0
 
-    for idx, group in enumerate(to_join, start=1):
-        username = getattr(group, "username", None)
-        identifier = f"@{username}" if username else f"id={group.id}"
+    for idx, t in enumerate(to_join, start=1):
         log.info(
             "[%d/%d] Вступаем в '%s' (%s)...",
             idx,
             len(to_join),
-            clean_control_chars(group.title),
-            identifier,
+            clean_control_chars(t["title"]),
+            t["link_or_id"],
         )
 
         try:
-            if isinstance(group, tl.Channel):
-                await client(JoinChannelRequest(group))
-                log.info("Успешно вступили в '%s'", clean_control_chars(group.title))
+            if t["type"] in ("username", "search_entity"):
+                entity = t["entity"]
+                if isinstance(entity, tl.Channel):
+                    await client(JoinChannelRequest(entity))
+                    log.info("Успешно вступили в '%s'", clean_control_chars(t["title"]))
+                    joined_count += 1
+                else:
+                    log.warning(
+                        "Пропуск '%s': базовые чаты (tl.Chat) не могут быть "
+                        "присоединены через JoinChannelRequest.",
+                        clean_control_chars(t["title"]),
+                    )
+            elif t["type"] == "hash":
+                from telethon.tl.functions.messages import ImportChatInviteRequest
+                await client(ImportChatInviteRequest(hash=t["hash"]))
+                log.info("Успешно вступили в '%s'", clean_control_chars(t["title"]))
                 joined_count += 1
-            else:
-                log.warning(
-                    "Пропуск '%s': базовые чаты (tl.Chat) не могут быть "
-                    "присоединены через JoinChannelRequest.",
-                    clean_control_chars(group.title),
-                )
+
         except FloodWaitError as e:
             wait_sec = int(e.seconds) + 5
             log.warning("FloodWait: необходимо подождать %d сек перед продолжением.", wait_sec)
             await asyncio.sleep(wait_sec)
             # Попробуем еще раз после ожидания
             try:
-                if isinstance(group, tl.Channel):
-                    await client(JoinChannelRequest(group))
-                    log.info(
-                        "Успешно вступили в '%s' (после FloodWait)",
-                        clean_control_chars(group.title),
-                    )
-                    joined_count += 1
+                if t["type"] in ("username", "search_entity"):
+                    await client(JoinChannelRequest(t["entity"]))
+                elif t["type"] == "hash":
+                    from telethon.tl.functions.messages import ImportChatInviteRequest
+                    await client(ImportChatInviteRequest(hash=t["hash"]))
+                log.info("Успешно вступили в '%s' (после FloodWait)", clean_control_chars(t["title"]))
+                joined_count += 1
             except FloodWaitError:
-                log.error(
-                    "Повторный FloodWait в '%s'. Пропускаем.",
-                    clean_control_chars(group.title),
-                )
+                log.error("Повторный FloodWait в '%s'. Пропускаем.", clean_control_chars(t["title"]))
             except (ChannelsTooMuchError, UsersTooMuchError) as e:
                 log.error(
-                    "Лимит на аккаунте превышен при повторной попытке! "
-                    "Не удалось вступить в '%s': %s",
-                    clean_control_chars(group.title),
+                    "Лимит на аккаунте превышен при повторной попытке! Не удалось вступить в '%s': %s",
+                    clean_control_chars(t["title"]),
                     type(e).__name__,
                 )
                 break
-            except Exception as e:  # noqa: BLE001
-                log.error(
-                    "Не удалось вступить в '%s' после FloodWait: %s",
-                    clean_control_chars(group.title),
-                    repr(e),
-                )
+            except Exception as e:
+                log.error("Не удалось вступить в '%s' после FloodWait: %s", clean_control_chars(t["title"]), repr(e))
+
         except (ChannelsTooMuchError, UsersTooMuchError) as e:
             log.error(
                 "Лимит на аккаунте превышен! Не удалось вступить в '%s': %s",
-                clean_control_chars(group.title),
+                clean_control_chars(t["title"]),
                 type(e).__name__,
             )
             break
-        except Exception as e:  # noqa: BLE001
-            log.error("Не удалось вступить в '%s': %s", clean_control_chars(group.title), repr(e))
+        except Exception as e:
+            log.error("Не удалось вступить в '%s': %s", clean_control_chars(t["title"]), repr(e))
 
         # Если это не последний элемент, делаем паузу
         if idx < len(to_join):
