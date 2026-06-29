@@ -174,6 +174,20 @@ async def _run_search(client, args: argparse.Namespace) -> None:  # noqa: ANN001
                     "Повторный FloodWait в '%s'. Пропускаем.",
                     clean_control_chars(group.title),
                 )
+            except (ChannelsTooMuchError, UsersTooMuchError) as e:
+                log.error(
+                    "Лимит на аккаунте превышен при повторной попытке! "
+                    "Не удалось вступить в '%s': %s",
+                    clean_control_chars(group.title),
+                    type(e).__name__,
+                )
+                break
+            except Exception as e:  # noqa: BLE001
+                log.error(
+                    "Не удалось вступить в '%s' после FloodWait: %s",
+                    clean_control_chars(group.title),
+                    repr(e),
+                )
         except (ChannelsTooMuchError, UsersTooMuchError) as e:
             log.error(
                 "Лимит на аккаунте превышен! Не удалось вступить в '%s': %s",
