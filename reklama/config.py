@@ -68,6 +68,7 @@ ACTIVE_HOURS: str = _get_str("ACTIVE_HOURS", "")
 MUTATE_MESSAGE: bool = _get_bool("MUTATE_MESSAGE", True)
 MAX_SLOWMODE_WAIT_SEC: int = _get_int("MAX_SLOWMODE_WAIT_SEC", 60)
 MAX_FLOODWAIT_ATTEMPTS: int = _get_int("MAX_FLOODWAIT_ATTEMPTS", 5)
+MAX_FLOODWAIT_SLEEP_SEC: int = _get_int("MAX_FLOODWAIT_SLEEP_SEC", 1800)
 
 
 @dataclass(frozen=True)

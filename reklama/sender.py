@@ -37,6 +37,7 @@ class SendResult:
 
     status: str  # progress.STATUS_SENT | STATUS_SKIPPED | STATUS_ERROR
     reason: str = ""
+    floodwait_seconds: int = 0
 
     @property
     def ok(self) -> bool:
@@ -113,15 +114,28 @@ async def send(
             return progress.STATUS_SENT, "text_only"
 
     attempts = 0
+    total_floodwait_seconds = 0
     while True:
         try:
             status, reason = await _try_send()
             if attempts > 0:
                 reason = f"{reason}_after_floodwait"
-            return SendResult(status, reason)
+            return SendResult(status, reason, floodwait_seconds=total_floodwait_seconds)
         except FloodWaitError as e:
             attempts += 1
             wait = int(getattr(e, "seconds", 60)) + 5
+            total_floodwait_seconds += wait
+            if wait > config.MAX_FLOODWAIT_SLEEP_SEC:
+                log.warning(
+                    "FloodWait слишком большой (%d сек > лимит %d сек). Пропускаем.",
+                    wait,
+                    config.MAX_FLOODWAIT_SLEEP_SEC,
+                )
+                return SendResult(
+                    progress.STATUS_SKIPPED,
+                    f"FloodWaitExceeded:{wait}",
+                    floodwait_seconds=total_floodwait_seconds,
+                )
             log.warning(
                 "FloodWait (попытка %d из %d): ждём %d сек.",
                 attempts,
@@ -134,7 +148,11 @@ async def send(
                     "Превышено число попыток обхода FloodWait (%d). Пропускаем чат.",
                     config.MAX_FLOODWAIT_ATTEMPTS,
                 )
-                return SendResult(progress.STATUS_SKIPPED, "FloodWaitLimitExceeded")
+                return SendResult(
+                    progress.STATUS_SKIPPED,
+                    "FloodWaitLimitExceeded",
+                    floodwait_seconds=total_floodwait_seconds,
+                )
         except SlowModeWaitError as e:
             wait = int(getattr(e, "seconds", 10))
             if wait <= config.MAX_SLOWMODE_WAIT_SEC:

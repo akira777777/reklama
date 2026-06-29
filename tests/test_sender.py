@@ -22,6 +22,13 @@ from reklama.sender import SendResult, detect_media_kind, send
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _mock_sender_sleep(monkeypatch: pytest.MonkeyPatch):
+    async def _fake_sleep(seconds: float) -> None:
+        pass
+    monkeypatch.setattr(sender.asyncio, "sleep", _fake_sleep)
+
+
 def test_send_result_ok():
     assert SendResult(progress.STATUS_SENT).ok is True
     assert SendResult(progress.STATUS_SKIPPED).ok is False
@@ -238,7 +245,7 @@ async def test_send_floodwait_uses_caller_provided_seconds(monkeypatch: pytest.M
         lambda: ChatWriteForbiddenError(request=GetConfigRequest()),
         lambda: UserBannedInChannelError(request=GetConfigRequest()),
         lambda: ChannelPrivateError(request=GetConfigRequest()),
-        lambda: SlowModeWaitError(request=GetConfigRequest(), capture="5"),
+        lambda: SlowModeWaitError(request=GetConfigRequest(), capture="75"),
     ],
 )
 async def test_send_skipped_classifications(make_exc):
@@ -249,8 +256,8 @@ async def test_send_skipped_classifications(make_exc):
 
     assert r.status == progress.STATUS_SKIPPED
     assert r.ok is False
-    # Reason should be the class name of the actual error that fired.
-    assert r.reason.endswith("Error")
+    # Reason should contain the class name of the actual error that fired.
+    assert "Error" in r.reason
 
 
 async def test_send_generic_exception_returns_error_status():
@@ -275,3 +282,21 @@ async def test_send_unknown_media_path_does_not_crash(monkeypatch: pytest.Monkey
     assert r.ok is True
     assert r.reason == "with_media"
     assert client.send_file.await_args.kwargs["force_document"] is True
+
+
+async def test_send_floodwait_exceeds_max_sleep_limit(monkeypatch: pytest.MonkeyPatch):
+    sleeps = _patch_sleep(monkeypatch)
+    monkeypatch.setattr(config, "MAX_FLOODWAIT_SLEEP_SEC", 100)
+    
+    # 200 seconds wait is requested. Safety margin adds +5 -> 205.
+    # This exceeds 100 limit, so it should skip immediately without sleeping.
+    fw = _floodwait(200)
+    msg = AsyncMock(side_effect=fw)
+    client = _client(send_message=msg)
+
+    r = await send(client, "chat-x", "hi", media_path=None)
+
+    assert r.status == progress.STATUS_SKIPPED
+    assert r.reason == "FloodWaitExceeded:205"
+    assert r.floodwait_seconds == 205
+    assert sleeps == []  # Should not have slept at all!

@@ -198,14 +198,15 @@ def _install_fake_auth(monkeypatch: pytest.MonkeyPatch, fake_client: Any) -> Any
     """Install a fake `auth` module so ``managed_telegram_client`` can use it.
 
     The function imports `auth` locally each invocation, so we have to swap
-    out ``sys.modules['auth']`` rather than just attribute-patching the
-    ``utils`` module namespace.
+    out ``sys.modules['reklama.auth']`` and the package attribute on ``reklama``.
     """
     fake_auth = SimpleNamespace(
         get_client=lambda: fake_client,
         start=AsyncMock(),
     )
-    monkeypatch.setitem(sys.modules, "auth", fake_auth)
+    import reklama
+    monkeypatch.setitem(sys.modules, "reklama.auth", fake_auth)
+    monkeypatch.setattr(reklama, "auth", fake_auth)
     return fake_auth
 
 
@@ -237,3 +238,23 @@ async def test_managed_telegram_client_disconnects_on_exception(
             raise _Boom("kaboom")
 
     fake_client.disconnect.assert_awaited_once()
+
+
+def test_mutate_message_preserves_emoji_tags(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(utils.config, "MUTATE_MESSAGE", True)
+    text = "Hello [emoji:12345] world! [emoji:6789]"
+    mutated = utils.mutate_message(text)
+
+    # Emoji tags must remain completely intact so parse_custom_emoji can match them
+    assert "[emoji:12345]" in mutated
+    assert "[emoji:6789]" in mutated
+
+    # Zero-width space, non-joiner, joiner, or BOM must be injected
+    invisible_chars = {"\u200b", "\u200c", "\u200d", "\ufeff"}
+    assert any(c in mutated for c in invisible_chars)
+
+
+def test_mutate_message_disabled(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(utils.config, "MUTATE_MESSAGE", False)
+    text = "Hello world!"
+    assert utils.mutate_message(text) == text

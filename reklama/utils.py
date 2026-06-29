@@ -73,16 +73,34 @@ async def managed_telegram_client() -> AsyncGenerator[TelegramClient, None]:
 
 
 def mutate_message(text: str) -> str:
-    """Добавляет случайный невидимый хвост из zero-width символов к сообщению.
+    """Добавляет случайные невидимые символы внутрь сообщения и хвост в конец.
 
     Это делает хэш каждого отправленного сообщения уникальным для обхода
     сигнатурных спам-фильтров Telegram, оставаясь невидимым для пользователей.
+    Безопасно обходит теги [emoji:doc_id] для сохранения их работоспособности.
     """
     import random
 
     if not config.MUTATE_MESSAGE or not text:
         return text
-    # Набор невидимых символов: zero-width space, zero-width non-joiner, zero-width joiner, BOM
+
     invisible_chars = ["\u200b", "\u200c", "\u200d", "\ufeff"]
+
+    # Разделяем текст по тегам [emoji:doc_id], чтобы не менять их содержимое
+    pattern = re.compile(r"(\[emoji:\d+\])")
+    parts = pattern.split(text)
+
+    for i in range(len(parts)):
+        # Четные индексы в parts — это обычный текст, нечетные — теги эмодзи
+        if i % 2 == 0 and parts[i]:
+            segment = parts[i]
+            mutated_segment = []
+            for char in segment:
+                mutated_segment.append(char)
+                # С вероятностью 15% добавляем невидимый символ после пробелов
+                if char.isspace() and random.random() < 0.15:
+                    mutated_segment.append(random.choice(invisible_chars))
+            parts[i] = "".join(mutated_segment)
+
     suffix = "".join(random.choices(invisible_chars, k=random.randint(1, 5)))
-    return text + suffix
+    return "".join(parts) + suffix

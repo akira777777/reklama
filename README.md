@@ -50,7 +50,7 @@ python search.py --query "маркетинг" --join --delay-min 15 --delay-max 
 python import_message.py
 
 # Импорт конкретного сообщения по ID из любого другого чата/канала:
-python import_message.py --chat "@akira667788" --message-id 2848836
+python import_message.py --chat "@username" --message-id 12345
 ```
 
 При первом запуске скрипт интерактивно запросит телефон, код из SMS и (если есть)

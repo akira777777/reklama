@@ -70,6 +70,24 @@ def parse_args() -> argparse.Namespace:
         default=30,
         help="Максимальная задержка между вступлениями в секундах (по умолчанию: 30).",
     )
+    p.add_argument(
+        "--join-batch-size",
+        type=int,
+        default=5,
+        help="Размер пакета вступлений перед длинной паузой (по умолчанию: 5).",
+    )
+    p.add_argument(
+        "--join-batch-delay-min",
+        type=int,
+        default=180,
+        help="Минимальная пауза между пакетами вступлений в секундах (по умолчанию: 180).",
+    )
+    p.add_argument(
+        "--join-batch-delay-max",
+        type=int,
+        default=360,
+        help="Максимальная пауза между пакетами вступлений в секундах (по умолчанию: 360).",
+    )
     args = p.parse_args()
     if not (args.query or args.file or args.links):
         p.error("Необходимо указать хотя бы один источник: --query, --file или --links")
@@ -214,6 +232,12 @@ async def _run_search(client, args: argparse.Namespace) -> None:  # noqa: ANN001
     dialogs = await client.get_dialogs()
     joined_ids = {d.id for d in dialogs}
     log.info("Вы состоите в %d диалогах.", len(joined_ids))
+    if len(joined_ids) >= 485:
+        log.warning(
+            "ВНИМАНИЕ: Вы состоите в %d диалогах (лимит Telegram — 500). "
+            "Дальнейшее вступление может привести к ошибкам лимита аккаунта.",
+            len(joined_ids),
+        )
 
     # 2. Собираем список групп для вступления/проверки
     targets: list[dict] = []
@@ -381,12 +405,24 @@ async def _run_search(client, args: argparse.Namespace) -> None:  # noqa: ANN001
 
         # Если это не последний элемент, делаем паузу
         if idx < len(to_join):
-            delay = random.randint(
-                min(args.delay_min, args.delay_max),
-                max(args.delay_min, args.delay_max),
-            )
-            log.info("Пауза перед следующим вступлением: %d сек...", delay)
-            await asyncio.sleep(delay)
+            if joined_count > 0 and joined_count % args.join_batch_size == 0:
+                batch_delay = random.randint(
+                    min(args.join_batch_delay_min, args.join_batch_delay_max),
+                    max(args.join_batch_delay_min, args.join_batch_delay_max),
+                )
+                log.info(
+                    "Пауза пакета вступлений (каждые %d вступлений): %d сек...",
+                    args.join_batch_size,
+                    batch_delay,
+                )
+                await asyncio.sleep(batch_delay)
+            else:
+                delay = random.randint(
+                    min(args.delay_min, args.delay_max),
+                    max(args.delay_min, args.delay_max),
+                )
+                log.info("Пауза перед следующим вступлением: %d сек...", delay)
+                await asyncio.sleep(delay)
 
     log.info("Процесс завершен. Успешно вступили в %d групп из %d.", joined_count, len(to_join))
 

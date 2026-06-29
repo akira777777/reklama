@@ -43,3 +43,21 @@ def test_nested_spintax():
     }
     assert results.issubset(expected)
     assert len(results) > 1
+
+
+def test_escaped_spintax():
+    text = "Hello \\{world\\} with \\| pipe and \\\\ backslash."
+    assert resolve_spintax(text) == "Hello {world} with | pipe and \\ backslash."
+
+    spintax = "Choose {\\{one\\}|\\{two\\}}"
+    results = {resolve_spintax(spintax) for _ in range(20)}
+    assert results == {"Choose {one}", "Choose {two}"}
+
+
+def test_unmatched_braces():
+    # Unmatched open braces should not crash and should resolve gracefully
+    assert resolve_spintax("Hello {world") == "Hello world"
+    # Unmatched close braces should be treated as literal
+    assert resolve_spintax("Hello world}") == "Hello world}"
+    # Unmatched pipes outside braces should be treated as literal
+    assert resolve_spintax("Hello | world") == "Hello | world"
