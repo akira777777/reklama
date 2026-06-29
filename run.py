@@ -30,6 +30,22 @@ def _clean(title: str) -> str:
     return _CONTROL_RE.sub(" ", str(title))
 
 
+def resolve_spintax(text: str) -> str:
+    """Разрешает spintax вида {вариант1|вариант2|вариант3}.
+
+    Поддерживает вложенность, например {Привет|Здравствуйте {друг|коллега}}.
+    """
+    pattern = re.compile(r"\{([^{}]+)\}")
+    while True:
+        match = pattern.search(text)
+        if not match:
+            break
+        options = match.group(1).split("|")
+        choice = random.choice(options)
+        text = text[: match.start()] + choice + text[match.end() :]
+    return text
+
+
 async def _record(state: dict, eid: int, status: str, reason: str) -> None:
     """Обновляет состояние в памяти и асинхронно (без блокировки цикла) пишет файл."""
     progress.apply(state, eid, status, reason)
@@ -132,9 +148,7 @@ async def run() -> None:
     if args.reset_progress:
         progress.reset()
 
-    text = read_message()
-    text, entities = emoji.parse_custom_emoji(text)
-    formatting_entities = entities if entities else None
+    text_template = read_message()
     media = config.resolve_media_path()
     if media:
         log.info("Медиа: %s (вид: %s)", media, sender.detect_media_kind(media))
@@ -161,6 +175,9 @@ async def run() -> None:
 
         if args.dry_run:
             log.info("=== DRY RUN ===")
+            sample_resolved = resolve_spintax(text_template)
+            sample_clean, _ = emoji.parse_custom_emoji(sample_resolved)
+            log.info("Пример сообщения после spintax:\n---\n%s\n---", sample_clean)
             resume = []
             for eid, title, _entity in groups:
                 if progress.should_skip_state(state, eid):
@@ -172,6 +189,7 @@ async def run() -> None:
             return
 
         done = 0
+        delay_multiplier = 1.0
         for i, (eid, title, entity) in enumerate(groups):
             if progress.should_skip_state(state, eid):
                 log.info("[%d/%d] ПРОПУСК (resume): %s", i + 1, total, _clean(title))
@@ -179,17 +197,32 @@ async def run() -> None:
 
             await ensure_active(window)
             log.info("[%d/%d] Отправка в: %s (id=%d)", i + 1, total, _clean(title), eid)
+
+            resolved_text = resolve_spintax(text_template)
+            final_text, entities = emoji.parse_custom_emoji(resolved_text)
+            formatting_entities = entities if entities else None
+
             result: SendResult = await sender.send(
-                client, entity, text, media, formatting_entities=formatting_entities
+                client, entity, final_text, media, formatting_entities=formatting_entities
             )
 
             if result.ok:
-                await _record(state, eid, progress.STATUS_SENT, "")
+                await _record(state, eid, progress.STATUS_SENT, result.reason)
                 extra = f" ({result.reason})" if result.reason else ""
                 log.info("[%d/%d] ОТПРАВЛЕНО%s.", i + 1, total, extra)
+                if "after_floodwait" in result.reason or "FloodWait" in result.reason:
+                    delay_multiplier = min(4.0, delay_multiplier * 1.5)
+                    log.info("Множитель задержек увеличен до %.2fx из-за FloodWait", delay_multiplier)
+                else:
+                    if delay_multiplier > 1.0:
+                        delay_multiplier = max(1.0, delay_multiplier - 0.1)
+                        log.info("Снижаем множитель задержек до %.2fx", delay_multiplier)
             elif result.status == progress.STATUS_SKIPPED:
                 await _record(state, eid, progress.STATUS_SKIPPED, result.reason)
                 log.warning("[%d/%d] ПРОПУСК: %s", i + 1, total, result.reason)
+                if "FloodWait" in result.reason:
+                    delay_multiplier = min(4.0, delay_multiplier * 2.0)
+                    log.info("Множитель задержек увеличен до %.2fx из-за FloodWait при пропуске", delay_multiplier)
             else:
                 await _record(state, eid, progress.STATUS_ERROR, result.reason)
                 log.error("[%d/%d] ОШИБКА: %s", i + 1, total, result.reason)
@@ -197,16 +230,30 @@ async def run() -> None:
             done += 1
             if i != total - 1:
                 if done % config.BATCH_SIZE == 0:
-                    pause = random.randint(
+                    base_pause = random.randint(
                         min(config.BATCH_PAUSE_MIN_SEC, config.BATCH_PAUSE_MAX_SEC),
                         max(config.BATCH_PAUSE_MIN_SEC, config.BATCH_PAUSE_MAX_SEC),
                     )
-                    log.info("Перерыв пакета (каждые %d): %d сек.", config.BATCH_SIZE, pause)
+                    pause = int(base_pause * delay_multiplier)
+                    log.info(
+                        "Перерыв пакета (каждые %d): %d сек (базовый %d сек, множитель %.2fx).",
+                        config.BATCH_SIZE,
+                        pause,
+                        base_pause,
+                        delay_multiplier,
+                    )
                     await asyncio.sleep(pause)
                 else:
-                    delay = random.randint(
+                    base_delay = random.randint(
                         min(config.DELAY_MIN_SEC, config.DELAY_MAX_SEC),
                         max(config.DELAY_MIN_SEC, config.DELAY_MAX_SEC),
+                    )
+                    delay = int(base_delay * delay_multiplier)
+                    log.info(
+                        "Задержка перед следующим: %d сек (базовый %d сек, множитель %.2fx).",
+                        delay,
+                        base_delay,
+                        delay_multiplier,
                     )
                     await asyncio.sleep(delay)
 

@@ -68,46 +68,59 @@ async def send(
     """Отправляет сообщение (с медиа или без) и классифицирует результат.
 
     formatting_entities — напр. кастомные эмодзи (MessageEntityCustomEmoji).
-    При FloodWaitError ждёт требуемое время и повторяет отправку один раз.
+    При FloodWaitError ждёт требуемое время и повторяет отправку (до 5 раз).
+    При ошибке отправки медиа автоматически отправляет только текст.
     """
 
-    async def _do_send() -> None:
-        if media_path:
-            kind = detect_media_kind(media_path)
-            force_document = kind == "document"
-            await client.send_file(
-                entity,
-                media_path,
-                caption=text,
-                force_document=force_document,
-                formatting_entities=formatting_entities,
-            )
-        else:
-            await client.send_message(
-                entity, text, formatting_entities=formatting_entities
-            )
+    async def _send_media() -> None:
+        assert media_path is not None
+        kind = detect_media_kind(media_path)
+        force_document = kind == "document"
+        await client.send_file(
+            entity,
+            media_path,
+            caption=text,
+            force_document=force_document,
+            formatting_entities=formatting_entities,
+        )
 
-    try:
-        await _do_send()
-    except FloodWaitError as e:
-        wait = int(getattr(e, "seconds", 60)) + 5
-        log.warning("FloodWait: ждём %d сек перед повтором.", wait)
-        await asyncio.sleep(wait)
+    async def _send_text() -> None:
+        await client.send_message(
+            entity, text, formatting_entities=formatting_entities
+        )
+
+    async def _do_send() -> tuple[str, str]:
+        if media_path:
+            try:
+                await _send_media()
+                return progress.STATUS_SENT, "with_media"
+            except (FloodWaitError, SlowModeWaitError, ChatWriteForbiddenError, UserBannedInChannelError, ChannelPrivateError) as e:
+                # Специальные ошибки пропускаем выше для внешней обработки
+                raise e
+            except Exception as e:
+                log.warning("Ошибка отправки медиа в %s (%s). Пробуем отправить только текст.", entity, repr(e))
+                await _send_text()
+                return progress.STATUS_SENT, f"text_fallback: {type(e).__name__}"
+        else:
+            await _send_text()
+            return progress.STATUS_SENT, "text_only"
+
+    attempts = 0
+    while True:
         try:
-            await _do_send()
-        except FloodWaitError as e2:
-            # Повторный FloodWait: уважаем требование, ждём и помечаем как пропуск.
-            wait2 = int(getattr(e2, "seconds", 60)) + 5
-            log.warning("Повторный FloodWait: ждём %d сек и пропускаем чат.", wait2)
-            await asyncio.sleep(wait2)
-            return SendResult(progress.STATUS_SKIPPED, "FloodWait")
-        except SKIPPED_ERRORS as e3:
-            return SendResult(progress.STATUS_SKIPPED, type(e3).__name__)
-        except Exception as e3:  # noqa: BLE001 — классифицируем всё прочее
-            return SendResult(progress.STATUS_ERROR, repr(e3))
-        return SendResult(progress.STATUS_SENT, "after_floodwait")
-    except SKIPPED_ERRORS as e:
-        return SendResult(progress.STATUS_SKIPPED, type(e).__name__)
-    except Exception as e:  # noqa: BLE001 — классифицируем всё прочее
-        return SendResult(progress.STATUS_ERROR, repr(e))
-    return SendResult(progress.STATUS_SENT)
+            status, reason = await _do_send()
+            if attempts > 0:
+                reason = f"{reason}_after_floodwait"
+            return SendResult(status, reason)
+        except FloodWaitError as e:
+            attempts += 1
+            wait = int(getattr(e, "seconds", 60)) + 5
+            log.warning("FloodWait (попытка %d из 5): ждём %d сек.", attempts, wait)
+            await asyncio.sleep(wait)
+            if attempts >= 5:
+                log.error("Превышено число попыток обхода FloodWait (5). Пропускаем чат.")
+                return SendResult(progress.STATUS_SKIPPED, "FloodWaitLimitExceeded")
+        except SKIPPED_ERRORS as e:
+            return SendResult(progress.STATUS_SKIPPED, type(e).__name__)
+        except Exception as e:  # noqa: BLE001 — классифицируем всё прочее
+            return SendResult(progress.STATUS_ERROR, repr(e))
