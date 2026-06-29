@@ -120,25 +120,27 @@ async def keyboard_listener() -> None:
             await asyncio.sleep(0.05)
     elif _has_termios:
         fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
+        old_settings = termios.tcgetattr(fd)  # type: ignore[attr-defined]
         try:
-            tty.setraw(fd)
+            tty.setraw(fd)  # type: ignore[attr-defined]
             while control_state["running"]:
                 rlist, _, _ = select.select([sys.stdin], [], [], 0.05)
                 if rlist:
-                    ch = sys.stdin.read(1)
-                    char = ch.lower()
-                    if char in ("p", " "):
+                    # Имена локальны для этой ветки: termios возвращает str,
+                    # тогда как ветка msvcrt выше использует bytes под тем же именем.
+                    key = sys.stdin.read(1)
+                    key_char = key.lower()
+                    if key_char in ("p", " "):
                         control_state["paused"] = not control_state["paused"]
-                    elif char == "s":
+                    elif key_char == "s":
                         control_state["skip_delay"] = True
-                    elif char == "q":
+                    elif key_char == "q":
                         control_state["running"] = False
                 await asyncio.sleep(0.05)
         except Exception:
             pass
         finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)  # type: ignore[attr-defined]
 
 
 async def smart_sleep(duration: float, state_label: str = "Ожидание") -> None:
