@@ -343,6 +343,8 @@ async def upload_media_file(file: UploadFile = File(...)):
             if item.is_file():
                 item.unlink()
                 
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="Неверное имя файла.")
         file_path = media_dir / file.filename
         with file_path.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
