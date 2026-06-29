@@ -50,6 +50,10 @@ def setup_logging() -> Path:
     if not root.handlers:
         sh = logging.StreamHandler(sys.stdout)
         sh.setFormatter(fmt)
+        # Используем UTF-8 для корректного отображения Unicode в консоли
+        if hasattr(sh.stream, 'reconfigure'):
+            # Python 3.7+: можно переконфигурировать поток
+            sh.stream.reconfigure(encoding='utf-8')
         fh = logging.FileHandler(log_file, encoding="utf-8")
         fh.setFormatter(fmt)
         root.addHandler(sh)
@@ -163,7 +167,7 @@ async def run() -> None:
                     resume.append((eid, title))
             for eid, title, _entity in groups:
                 flag = " [уже отправлено]" if progress.should_skip_state(state, eid) else ""
-                print(f"  - {_clean(title)} (id={eid}){flag}")
+                log.info("  - %s (id=%d)%s", _clean(title), eid, flag)
             log.info("Будет пропущено (resume): %d из %d.", len(resume), total)
             return
 
