@@ -1,4 +1,9 @@
 {
+  "1195762393": {
+    "reason": "with_media",
+    "status": "sent",
+    "ts": 1782738857.9296064
+  },
   "1215648146": {
     "reason": "SlowModeWaitError:900",
     "status": "skipped",
@@ -13,5 +18,15 @@
     "reason": "with_media",
     "status": "sent",
     "ts": 1782738547.4185777
+  },
+  "1585402816": {
+    "reason": "with_media",
+    "status": "sent",
+    "ts": 1782738993.4761333
+  },
+  "1955802803": {
+    "reason": "with_media",
+    "status": "sent",
+    "ts": 1782738923.3376067
   }
 }
