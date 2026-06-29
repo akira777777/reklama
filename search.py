@@ -504,29 +504,27 @@ async def _run_search(client, args: argparse.Namespace) -> None:  # noqa: ANN001
                 )
                 break
             except Exception as e:
-                log.error("Не удалось вступить в '%s' после FloodWait: %s", clean_control_chars(t["title"]), repr(e))
+                log.error("Не удалось вступить в '%s':join: %s", clean_control_chars(t["title"]), repr(e))
 
-
-        # Если это не последний элемент, делаем паузу
-        if idx < len(to_join):
-            if joined_count > 0 and joined_count % args.join_batch_size == 0:
-                batch_delay = random.randint(
-                    min(args.join_batch_delay_min, args.join_batch_delay_max),
-                    max(args.join_batch_delay_min, args.join_batch_delay_max),
-                )
-                log.info(
-                    "Пауза пакета вступлений (каждые %d вступлений): %d сек...",
-                    args.join_batch_size,
-                    batch_delay,
-                )
-                await asyncio.sleep(batch_delay)
-            else:
-                delay = random.randint(
-                    min(args.delay_min, args.delay_max),
-                    max(args.delay_min, args.delay_max),
-                )
-                log.info("Пауза перед следующим вступлением: %d сек...", delay)
-                await asyncio.sleep(delay)
+            if idx < len(to_join):
+                if joined_count > 0 and joined_count % args.join_batch_size == 0:
+                    batch_delay = random.randint(
+                        min(args.join_batch_delay_min, args.join_batch_delay_max),
+                        max(args.join_batch_delay_min, args.join_batch_delay_max),
+                    )
+                    log.info(
+                        "Пауза пакета вступлений (каждые %d вступлений): %d сек...",
+                        args.join_batch_size,
+                        batch_delay,
+                    )
+                    await search_sleep(batch_delay, f"Пауза пакета вступлений ({args.join_batch_size})")
+                else:
+                    delay = random.randint(
+                        min(args.delay_min, args.delay_max),
+                        max(args.delay_min, args.delay_max),
+                    )
+                    log.info("Пауза перед следующим вступлением: %d сек...", delay)
+                    await search_sleep(delay, "Пауза перед вступлением")
 
         log.info("Процесс завершен. Успешно вступили в %d групп из %d.", joined_count, len(to_join))
         search_state["status"] = "Завершено"
