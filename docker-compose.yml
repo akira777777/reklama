@@ -1,38 +1,103 @@
-version: '3.8'
-
 services:
   # Main application service for running reklama scripts (run.py, search.py, import_message.py)
   app:
-    build: .
+    build:
+      context: .
+      target: runtime
     image: telegram-reklama:latest
     container_name: telegram-reklama-app
     stdin_open: true  # Enables interactive inputs (phone, SMS code, 2FA)
     tty: true         # Allocates a pseudo-TTY (interactive terminal)
+    restart: on-failure:5
     volumes:
       - .:/app
     env_file:
       - .env
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Service to run tests (pytest)
   test:
-    image: telegram-reklama:latest
+    build:
+      context: .
+      target: dev
+    image: telegram-reklama:dev
     container_name: telegram-reklama-test
+    profiles: [dev]
     volumes:
       - .:/app
     command: pytest
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 512M
 
   # Service to run code style linting (ruff)
   lint:
-    image: telegram-reklama:latest
+    image: telegram-reklama:dev
     container_name: telegram-reklama-lint
+    profiles: [dev]
     volumes:
       - .:/app
     command: ruff check .
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
 
   # Service to run static type checking (mypy)
   mypy:
-    image: telegram-reklama:latest
+    image: telegram-reklama:dev
     container_name: telegram-reklama-mypy
+    profiles: [dev]
     volumes:
       - .:/app
     command: mypy .
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+
+  # Web interface to control the project
+  web:
+    build:
+      context: .
+      target: runtime
+    image: telegram-reklama:latest
+    container_name: telegram-reklama-web
+    profiles: [web]
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    command: python web.py
+    restart: on-failure:5
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

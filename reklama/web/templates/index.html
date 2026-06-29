@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>reklama — Панель управления рассылкой</title>
+    <meta name="description" content="Веб-интерфейс для контроля Telegram-юзербота рассылки рекламы">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="glass-bg"></div>
+    <div class="app-container">
+        <!-- HEADER -->
+        <header class="main-header">
+            <div class="brand">
+                <div class="logo-pulse"></div>
+                <h1>reklama <span class="badge">юзербот</span></h1>
+            </div>
+            <div id="auth-status-container" class="auth-status-card">
+                <span class="status-dot offline"></span>
+                <span class="status-text">Проверка подключения...</span>
+            </div>
+        </header>
+
+        <!-- MAIN LAYOUT -->
+        <main class="dashboard-grid">
+            <!-- LEFT PANEL: CONTROLS & SECTIONS -->
+            <section class="left-panel">
+                <!-- AUTH WIZARD (HIDDEN BY DEFAULT IF LOGGED IN) -->
+                <div id="auth-wizard-section" class="glass-panel card hidden">
+                    <h2 class="panel-title">Вход в Telegram</h2>
+                    <p class="panel-desc">Скрипт требует авторизации. Ваши данные сессии хранятся локально.</p>
+                    
+                    <!-- Step 1: Phone -->
+                    <div id="auth-step-phone" class="auth-step">
+                        <label for="input-phone" class="field-label">Номер телефона (международный формат):</label>
+                        <div class="input-group">
+                            <input type="text" id="input-phone" placeholder="+79991234567" class="text-input">
+                            <button id="btn-send-code" class="btn primary">Получить код</button>
+                        </div>
+                    </div>
+
+                    <!-- Step 2: Code & 2FA -->
+                    <div id="auth-step-code" class="auth-step hidden">
+                        <label for="input-code" class="field-label">Код подтверждения из Telegram:</label>
+                        <input type="text" id="input-code" placeholder="12345" class="text-input mb-3">
+                        
+                        <div id="auth-2fa-container" class="hidden">
+                            <label for="input-2fa" class="field-label">Пароль двухфакторной аутентификации (2FA):</label>
+                            <input type="password" id="input-2fa" placeholder="Введите ваш облачный пароль" class="text-input mb-3">
+                        </div>
+
+                        <button id="btn-submit-code" class="btn primary w-full">Войти</button>
+                    </div>
+                </div>
+
+                <!-- TABS CONTAINER -->
+                <div class="tabs-container glass-panel">
+                    <nav class="tabs-nav">
+                        <button class="tab-btn active" data-tab="campaign-tab">Рассылка</button>
+                        <button class="tab-btn" data-tab="search-tab">Поиск групп</button>
+                        <button class="tab-btn" data-tab="message-tab">Сообщение</button>
+                        <button class="tab-btn" data-tab="config-tab">Настройки</button>
+                    </nav>
+
+                    <div class="tabs-content">
+                        <!-- TAB: CAMPAIGN -->
+                        <div id="campaign-tab" class="tab-pane active">
+                            <div class="campaign-actions">
+                                <div class="action-grid mb-4">
+                                    <div class="flex-col">
+                                        <label for="limit-groups" class="field-label">Лимит групп (0 - все):</label>
+                                        <input type="number" id="limit-groups" value="0" min="0" class="text-input">
+                                    </div>
+                                    <div class="flex-row items-end gap-2">
+                                        <label class="checkbox-container">
+                                            <input type="checkbox" id="check-dry-run">
+                                            <span class="checkmark"></span>
+                                            Тестовый проход (Dry Run)
+                                        </label>
+                                        <label class="checkbox-container">
+                                            <input type="checkbox" id="check-reset-progress">
+                                            <span class="checkmark"></span>
+                                            Сбросить прогресс
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="control-buttons">
+                                    <button id="btn-campaign-start" class="btn success flex-1">Запустить рассылку</button>
+                                    <button id="btn-campaign-pause" class="btn warning hidden">Пауза</button>
+                                    <button id="btn-campaign-resume" class="btn success hidden">Продолжить</button>
+                                    <button id="btn-campaign-skip" class="btn info hidden">Пропустить паузу</button>
+                                    <button id="btn-campaign-stop" class="btn danger hidden">Остановить</button>
+                                </div>
+                            </div>
+
+                            <!-- CAMPAIGN STATS -->
+                            <div class="stats-section mt-4">
+                                <div class="progress-container mb-3">
+                                    <div class="progress-header">
+                                        <span class="progress-title">Общий прогресс:</span>
+                                        <span id="stat-progress-pct" class="progress-val">0%</span>
+                                    </div>
+                                    <div class="progress-bar-bg">
+                                        <div id="stat-progress-bar" class="progress-bar-fill" style="width: 0%"></div>
+                                    </div>
+                                </div>
+
+                                <div class="stats-grid">
+                                    <div class="stat-card">
+                                        <span class="stat-label">Отправлено</span>
+                                        <span id="stat-sent" class="stat-value text-green">0</span>
+                                    </div>
+                                    <div class="stat-card">
+                                        <span class="stat-label">Пропущено</span>
+                                        <span id="stat-skipped" class="stat-value text-yellow">0</span>
+                                    </div>
+                                    <div class="stat-card">
+                                        <span class="stat-label">Ошибки</span>
+                                        <span id="stat-errors" class="stat-value text-red">0</span>
+                                    </div>
+                                    <div class="stat-card">
+                                        <span class="stat-label">Всего в списке</span>
+                                        <span id="stat-total" class="stat-value">0</span>
+                                    </div>
+                                </div>
+
+                                <div class="campaign-detail-card mt-3">
+                                    <div class="detail-row">
+                                        <span class="detail-label">Текущая группа:</span>
+                                        <span id="stat-current-group" class="detail-val">Нет</span>
+                                    </div>
+                                    <div class="detail-row">
+                                        <span class="detail-label">Статус оркестратора:</span>
+                                        <span id="stat-state" class="detail-val">Ожидание</span>
+                                    </div>
+                                    <div class="detail-row">
+                                        <span class="detail-label">Оставшаяся задержка:</span>
+                                        <span id="stat-timer" class="detail-val text-magenta">-</span>
+                                    </div>
+                                    <div class="detail-row">
+                                        <span class="detail-label">Множитель задержек:</span>
+                                        <span id="stat-multiplier" class="detail-val">1.0x</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- TAB: GROUP SEARCH -->
+                        <div id="search-tab" class="tab-pane">
+                            <div class="search-form">
+                                <label for="search-query" class="field-label">Ключевое слово для глобального поиска:</label>
+                                <input type="text" id="search-query" placeholder="например, маркетинг" class="text-input mb-3">
+
+                                <label for="search-links" class="field-label">Или список ссылок/юзернеймов (по одной в строке):</label>
+                                <textarea id="search-links" rows="4" placeholder="t.me/group_username&#10;@another_group&#10;https://t.me/joinchat/XXXXX" class="text-input mb-3"></textarea>
+
+                                <div class="search-settings-grid mb-3">
+                                    <div>
+                                        <label for="search-limit" class="field-label">Лимит глобального поиска:</label>
+                                        <input type="number" id="search-limit" value="20" min="1" class="text-input">
+                                    </div>
+                                    <div class="flex-row items-end">
+                                        <label class="checkbox-container">
+                                            <input type="checkbox" id="search-check-join" checked>
+                                            <span class="checkmark"></span>
+                                            Авто-вступление
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="control-buttons">
+                                    <button id="btn-search-start" class="btn primary flex-1">Запустить поиск/вступление</button>
+                                    <button id="btn-search-stop" class="btn danger hidden">Остановить</button>
+                                </div>
+
+                                <!-- SEARCH MONITOR -->
+                                <div id="search-monitor" class="search-monitor-card mt-4 hidden">
+                                    <h4>Статус поиска и вступления</h4>
+                                    <div class="detail-row mt-2">
+                                        <span class="detail-label">Операция:</span>
+                                        <span id="search-stat-status" class="detail-val">Сбор...</span>
+                                    </div>
+                                    <div class="detail-row">
+                                        <span class="detail-label">Обрабатывается:</span>
+                                        <span id="search-stat-group" class="detail-val">Нет</span>
+                                    </div>
+                                    <div class="detail-row">
+                                        <span class="detail-label">Успешных вступлений:</span>
+                                        <span id="search-stat-joined" class="detail-val text-green">0 / 0</span>
+                                    </div>
+                                    <div class="detail-row">
+                                        <span class="detail-label">Таймер ожидания:</span>
+                                        <span id="search-stat-timer" class="detail-val text-magenta">-</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- TAB: MESSAGE EDITOR -->
+                        <div id="message-tab" class="tab-pane">
+                            <div class="message-editor">
+                                <label for="message-text" class="field-label">Текст сообщения (поддерживает рандомизацию Spintax {A|B}):</label>
+                                <textarea id="message-text" rows="8" class="text-input font-mono mb-3" placeholder="Текст сообщения..."></textarea>
+                                
+                                <div class="flex-row justify-end mb-4">
+                                    <button id="btn-message-save" class="btn primary">Сохранить текст</button>
+                                </div>
+
+                                <h3 class="section-subtitle">Медиафайл рассылки</h3>
+                                <p class="panel-desc">Скрипт рассылает первый медиафайл, найденный в папке `media/`.</p>
+                                
+                                <div class="media-manager-card mt-2">
+                                    <div class="media-info mb-3">
+                                        <span class="detail-label">Активный файл:</span>
+                                        <span id="media-filename" class="detail-val italic">Медиа отсутствует</span>
+                                    </div>
+                                    
+                                    <div class="media-actions">
+                                        <label class="btn info file-upload-label">
+                                            <input type="file" id="media-upload-input" class="hidden">
+                                            Загрузить новый файл
+                                        </label>
+                                        <button id="btn-media-delete" class="btn danger">Удалить файл</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- TAB: CONFIGURATION -->
+                        <div id="config-tab" class="tab-pane">
+                            <form id="config-form" class="config-editor">
+                                <div class="config-grid">
+                                    <div class="config-group">
+                                        <label for="cfg-api-id" class="field-label">TELEGRAM_API_ID:</label>
+                                        <input type="text" id="cfg-api-id" class="text-input" placeholder="api_id">
+                                    </div>
+                                    <div class="config-group">
+                                        <label for="cfg-api-hash" class="field-label">TELEGRAM_API_HASH:</label>
+                                        <input type="text" id="cfg-api-hash" class="text-input" placeholder="api_hash">
+                                    </div>
+                                    <div class="config-group">
+                                        <label for="cfg-delay-min" class="field-label">Мин. пауза рассылки (сек):</label>
+                                        <input type="number" id="cfg-delay-min" class="text-input" min="5">
+                                    </div>
+                                    <div class="config-group">
+                                        <label for="cfg-delay-max" class="field-label">Макс. пауза рассылки (сек):</label>
+                                        <input type="number" id="cfg-delay-max" class="text-input" min="5">
+                                    </div>
+                                    <div class="config-group">
+                                        <label for="cfg-batch-size" class="field-label">Размер пакета (BATCH_SIZE):</label>
+                                        <input type="number" id="cfg-batch-size" class="text-input" min="1">
+                                    </div>
+                                    <div class="config-group">
+                                        <label for="cfg-batch-pause-min" class="field-label">Мин. перерыв пакета (сек):</label>
+                                        <input type="number" id="cfg-batch-pause-min" class="text-input" min="10">
+                                    </div>
+                                    <div class="config-group">
+                                        <label for="cfg-batch-pause-max" class="field-label">Макс. перерыв пакета (сек):</label>
+                                        <input type="number" id="cfg-batch-pause-max" class="text-input" min="10">
+                                    </div>
+                                    <div class="config-group">
+                                        <label for="cfg-active-hours" class="field-label">Окно активности (напр. 09:00-21:00):</label>
+                                        <input type="text" id="cfg-active-hours" class="text-input" placeholder="Пусто = круглосуточно">
+                                    </div>
+                                </div>
+
+                                <div class="flex-row justify-end mt-4">
+                                    <button type="button" id="btn-config-save" class="btn primary">Сохранить конфигурацию</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- RIGHT PANEL: LIVE SYSTEM LOGS -->
+            <section class="right-panel glass-panel">
+                <h2 class="panel-title mb-2">Журнал активности (Консоль)</h2>
+                <div class="console-wrapper">
+                    <div id="system-console" class="console-body">
+                        <div class="console-line system-msg">Инициализация веб-интерфейса...</div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+    
+    <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,26 +1,51 @@
-FROM python:3.11-slim
+# ── Stage 1: build dependencies ───────────────────────────────────────────────
+FROM python:3.11-slim AS builder
 
-# Prevent Python from writing .pyc files to disk
-ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Prevent Python from buffering stdout and stderr (helps with Docker logging)
-ENV PYTHONUNBUFFERED=1
+WORKDIR /build
 
-WORKDIR /app
-
-# Install basic system packages needed for compiling some Python packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy python dependencies list first for caching
-COPY requirements.txt requirements-dev.txt pyproject.toml ./
+COPY requirements.txt pyproject.toml ./
+RUN pip install --prefix=/install -r requirements.txt
 
-# Install project and development dependencies
+# ── Stage 2: dev (test / lint / mypy) ─────────────────────────────────────────
+FROM python:3.11-slim AS dev
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+COPY --from=builder /install /usr/local
+
+COPY requirements-dev.txt ./
 RUN pip install --no-cache-dir -r requirements-dev.txt
 
-# Copy the rest of the workspace code into /app
 COPY . .
 
-# Default command when running the container
+CMD ["python", "run.py"]
+
+# ── Stage 3: production runtime ───────────────────────────────────────────────
+FROM python:3.11-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Copy only compiled wheels from builder — no build tools in prod image
+COPY --from=builder /install /usr/local
+
+# Copy application source only (no dev deps, no test files)
+COPY reklama/ ./reklama/
+COPY run.py search.py import_message.py pyproject.toml ./
+
 CMD ["python", "run.py"]

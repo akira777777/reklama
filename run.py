@@ -9,6 +9,7 @@ import random
 import re
 import sys
 from datetime import datetime
+from typing import Any
 
 try:
     import msvcrt
@@ -33,8 +34,9 @@ from rich.progress import ProgressBar
 from rich.table import Table
 from rich.text import Text
 
+from telethon import TelegramClient
+
 from reklama import auth, config, dialogs, emoji, progress, sender
-from reklama.sender import SendResult
 from reklama.utils import mutate_message, setup_logging
 
 log = logging.getLogger("run")
@@ -46,7 +48,7 @@ _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 
 # Глобальное состояние для управления TUI и логикой прерывания/паузы
-control_state = {
+control_state: dict[str, Any] = {
     "running": True,
     "paused": False,
     "skip_delay": False,
@@ -101,11 +103,11 @@ async def keyboard_listener() -> None:
 
     if _has_msvcrt:
         while control_state["running"]:
-            if msvcrt.kbhit():
+            if msvcrt.kbhit():  # type: ignore[attr-defined]
                 try:
-                    ch = msvcrt.getch()
+                    ch = msvcrt.getch()  # type: ignore[attr-defined]
                     if ch in (b'\xe0', b'\x00'):
-                        msvcrt.getch()  # сбросить расширенный код
+                        msvcrt.getch()  # type: ignore[attr-defined]  # сбросить расширенный код
                         continue
                     char = ch.decode("utf-8", errors="ignore").lower()
                     if char in ("p", " "):
@@ -256,7 +258,8 @@ def _clean(title: str) -> str:
 
 
 class SpintaxNode:
-    pass
+    def resolve(self) -> str:
+        raise NotImplementedError()
 
 class SpintaxText(SpintaxNode):
     def __init__(self, text: str):
@@ -423,12 +426,31 @@ async def ensure_active(window: config.ActiveWindow | None) -> None:
         await smart_sleep(min(wait, 3600), "Ожидание окна активности")
 
 
-async def run() -> None:
-    args = parse_args()
+async def run(
+    client: TelegramClient | None = None,
+    dry_run: bool | None = None,
+    limit: int | None = None,
+    reset_progress: bool | None = None,
+    no_tui: bool = True,
+) -> None:
+    is_programmatic = client is not None or dry_run is not None or limit is not None or reset_progress is not None
+
+    if not is_programmatic:
+        args = parse_args()
+        p_dry_run = args.dry_run
+        p_limit = args.limit
+        p_reset_progress = args.reset_progress
+        p_no_tui = args.no_tui
+    else:
+        p_dry_run = bool(dry_run)
+        p_limit = limit
+        p_reset_progress = bool(reset_progress)
+        p_no_tui = bool(no_tui)
+
     log_file = setup_logging("run")
     log.info("Лог запуска: %s", log_file)
 
-    if args.reset_progress:
+    if p_reset_progress:
         progress.reset()
 
     text_template = read_message()
@@ -436,11 +458,14 @@ async def run() -> None:
     
     # Инициализация глобального состояния
     control_state["active_hours"] = config.ACTIVE_HOURS
+    control_state["running"] = True
+    control_state["paused"] = False
+    control_state["skip_delay"] = False
     
     window = config.parse_active_hours(config.ACTIVE_HOURS)
     
     # Проверка интерактивности и флага --no-tui
-    use_tui = not args.no_tui and sys.stdout.isatty()
+    use_tui = not p_no_tui and sys.stdout.isatty()
     
     tui_log_handler = None
     live = None
@@ -486,22 +511,25 @@ async def run() -> None:
         if window:
             log.info("Окно активности: %s", config.ACTIVE_HOURS)
 
-        async with auth.client_session() as client:
-            if not args.dry_run and control_state["running"]:
+        async def execute_campaign(client_obj):
+            if not p_dry_run and control_state["running"]:
                 if use_tui:
                     control_state["state"] = "Самопроверка..."
-                if not await auth.check_self(client):
+                if not await auth.check_self(client_obj):
                     log.critical("Самопроверка аккаунта не удалась. Завершаем работу.")
-                    sys.exit(1)
+                    if is_programmatic:
+                        raise RuntimeError("Самопроверка аккаунта не удалась")
+                    else:
+                        sys.exit(1)
 
             if not control_state["running"]:
                 return
 
             if use_tui:
                 control_state["state"] = "Сбор групп..."
-            groups = await dialogs.collect_groups(client)
-            if args.limit is not None:
-                groups = groups[: args.limit]
+            groups = await dialogs.collect_groups(client_obj)
+            if p_limit is not None:
+                groups = groups[: p_limit]
             total = len(groups)
             control_state["total"] = total
             
@@ -518,7 +546,7 @@ async def run() -> None:
             control_state["skipped"] = stats[progress.STATUS_SKIPPED]
             control_state["errors"] = stats[progress.STATUS_ERROR]
 
-            if args.dry_run:
+            if p_dry_run:
                 if use_tui:
                     control_state["state"] = "DRY RUN проход..."
                 log.info("=== DRY RUN ===")
@@ -568,8 +596,8 @@ async def run() -> None:
                 final_text, entities = emoji.parse_custom_emoji(mutated_text)
                 formatting_entities = entities if entities else None
 
-                result: SendResult = await sender.send(
-                    client, entity, final_text, media, formatting_entities=formatting_entities
+                result = await sender.send(
+                    client_obj, entity, final_text, media, formatting_entities=formatting_entities
                 )
 
                 if result.ok:
@@ -653,6 +681,12 @@ async def run() -> None:
             if use_tui:
                 control_state["state"] = "Завершено"
                 await asyncio.sleep(1.0)
+
+        if client is not None:
+            await execute_campaign(client)
+        else:
+            async with auth.client_session() as new_client:
+                await execute_campaign(new_client)
     finally:
         # Очистка TUI ресурсов
         control_state["running"] = False
