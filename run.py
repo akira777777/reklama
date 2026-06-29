@@ -16,20 +16,22 @@ try:
 except ImportError:
     _has_msvcrt = False
     try:
+        import select
         import termios
         import tty
-        import select
         _has_termios = True
     except ImportError:
         _has_termios = False
 
+import contextlib
+
+from rich.align import Align
+from rich.console import Console
 from rich.live import Live
-from rich.table import Table
 from rich.panel import Panel
 from rich.progress import ProgressBar
+from rich.table import Table
 from rich.text import Text
-from rich.console import Console
-from rich.align import Align
 
 from reklama import auth, config, dialogs, emoji, progress, sender
 from reklama.sender import SendResult
@@ -318,10 +320,7 @@ def resolve_spintax(text: str) -> str:
             flush_text()
             if stack:
                 node = stack.pop()
-                if stack:
-                    current_list = stack[-1].options[-1]
-                else:
-                    current_list = root
+                current_list = stack[-1].options[-1] if stack else root
                 current_list.append(node)
             else:
                 current_text.append(char)
@@ -471,10 +470,8 @@ async def run() -> None:
         # Фоновый апдейтер экрана
         async def dashboard_updater():
             while control_state["running"]:
-                try:
+                with contextlib.suppress(Exception):
                     live.update(make_layout(tui_log_handler))
-                except Exception:
-                    pass
                 await asyncio.sleep(0.25)
         updater_task = asyncio.create_task(dashboard_updater())
         
@@ -538,10 +535,9 @@ async def run() -> None:
                     flag = " [уже отправлено]" if progress.should_skip_state(state, eid) else ""
                     log.info("  - %s (id=%d)%s", _clean(title), eid, flag)
                 log.info("Будет пропущено (resume): %d из %d.", skipped_count, total)
-                if use_tui:
+                if use_tui and control_state["running"]:
                     # Даем пользователю посмотреть на TUI при dry-run, если не было прервано
-                    if control_state["running"]:
-                        await smart_sleep(5.0, "DRY RUN Завершен")
+                    await smart_sleep(5.0, "DRY RUN Завершен")
                 return
 
             done = 0
@@ -685,7 +681,7 @@ async def run() -> None:
         summary_table.add_row("Ошибки отправки", f"[bold red]{control_state['errors']}[/]")
         summary_table.add_row("Всего в списке", f"[bold white]{control_state['total']}[/]")
         console.print(summary_table)
-        console.print(f"[dim]Полный лог работы сохранен в файле запуска.[/]")
+        console.print("[dim]Полный лог работы сохранен в файле запуска.[/]")
         console.print()
 
 

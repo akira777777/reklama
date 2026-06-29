@@ -206,7 +206,7 @@ def _install_fake_auth(monkeypatch: pytest.MonkeyPatch, fake_client: Any) -> Any
     )
     import reklama
     monkeypatch.setitem(sys.modules, "reklama.auth", fake_auth)
-    monkeypatch.setattr(reklama, "auth", fake_auth)
+    monkeypatch.setattr(reklama, "auth", fake_auth, raising=False)
     return fake_auth
 
 

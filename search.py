@@ -274,7 +274,7 @@ async def _run_search(client, args: argparse.Namespace) -> None:  # noqa: ANN001
     if args.file:
         log.info("Чтение ссылок из файла: %s...", args.file)
         try:
-            with open(args.file, "r", encoding="utf-8") as f:
+            with open(args.file, encoding="utf-8") as f:
                 for line in f:
                     line_clean = line.strip()
                     if line_clean and not line_clean.startswith("#"):

@@ -30,9 +30,7 @@ def is_group(entity: Any) -> bool:
         if getattr(entity, "deactivated", False):
             return False
         default_banned = getattr(entity, "default_banned_rights", None)
-        if default_banned and getattr(default_banned, "send_messages", False):
-            return False
-        return True
+        return not (default_banned and getattr(default_banned, "send_messages", False))
     # Супергруппа (megagroup=True); каналы-трансляции и покинутые отбрасываем.
     if (
         isinstance(entity, tl.Channel)
