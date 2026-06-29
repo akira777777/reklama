@@ -4,24 +4,23 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-
-# Импортируем модули проекта
-from reklama import auth, config, progress
-import run
-import search
 from telethon import TelegramClient
 from telethon.errors import SessionPasswordNeededError
+
+import run
+import search
+
+# Импортируем модули проекта
+from reklama import auth, config
 
 # Настройка логирования для веб-сервера
 logger = logging.getLogger("web")

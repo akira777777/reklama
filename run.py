@@ -33,7 +33,6 @@ from rich.panel import Panel
 from rich.progress import ProgressBar
 from rich.table import Table
 from rich.text import Text
-
 from telethon import TelegramClient
 
 from reklama import auth, config, dialogs, emoji, progress, sender
