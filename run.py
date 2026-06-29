@@ -37,10 +37,10 @@ def _clean(title: str) -> str:
     return _CONTROL_RE.sub(" ", str(title))
 
 
-async def _record(state: dict, eid: int, status: str, reason: str) -> None:
+async def _record(state: dict, eid: int, status: str, reason: str, path: str | None = None) -> None:
     """Обновляет состояние в памяти и асинхронно (без блокировки цикла) пишет файл."""
     progress.apply(state, eid, status, reason)
-    await asyncio.to_thread(progress.save, state)
+    await asyncio.to_thread(progress.save, state, path)
 
 
 def parse_args() -> argparse.Namespace:
@@ -117,8 +117,9 @@ async def run(
     limit: int | None = None,
     reset_progress: bool | None = None,
     no_tui: bool = True,
+    account: config.Account | None = None,
 ) -> None:
-    is_programmatic = client is not None or dry_run is not None or limit is not None or reset_progress is not None
+    is_programmatic = client is not None or dry_run is not None or limit is not None or reset_progress is not None or account is not None
 
     if not is_programmatic:
         args = parse_args()
@@ -132,11 +133,14 @@ async def run(
         p_reset_progress = bool(reset_progress)
         p_no_tui = bool(no_tui)
 
+    # Путь к файлу прогресса: per-account, иначе дефолт (progress.json) для CLI.
+    progress_path: str | None = account.progress_path if account is not None else None
+
     log_file = setup_logging("run")
     log.info("Лог запуска: %s", log_file)
 
     if p_reset_progress:
-        progress.reset()
+        progress.reset(progress_path)
 
     text_template = read_message()
     media = config.resolve_media_path()
@@ -219,7 +223,7 @@ async def run(
                 log.warning("Группы не найдены — нечего рассылать.")
                 return
 
-            state = progress.load()
+            state = progress.load(progress_path)
             
             # Синхронизируем статистику с сохраненным прогрессом
             stats = progress.summarize(state)
@@ -282,7 +286,7 @@ async def run(
                 )
 
                 if result.ok:
-                    await _record(state, eid, progress.STATUS_SENT, result.reason)
+                    await _record(state, eid, progress.STATUS_SENT, result.reason, progress_path)
                     control_state["sent"] += 1
                     extra = f" ({result.reason})" if result.reason else ""
                     log.info("[%d/%d] ОТПРАВЛЕНО%s.", i + 1, total, extra)
@@ -306,7 +310,7 @@ async def run(
                             control_state["delay_multiplier"] = delay_multiplier
                             log.info("Снижаем множитель задержек до %.2fx", delay_multiplier)
                 elif result.status == progress.STATUS_SKIPPED:
-                    await _record(state, eid, progress.STATUS_SKIPPED, result.reason)
+                    await _record(state, eid, progress.STATUS_SKIPPED, result.reason, progress_path)
                     control_state["skipped"] += 1
                     log.warning("[%d/%d] ПРОПУСК: %s", i + 1, total, result.reason)
                     if result.floodwait_seconds > 0:
@@ -324,7 +328,7 @@ async def run(
                             result.floodwait_seconds,
                         )
                 else:
-                    await _record(state, eid, progress.STATUS_ERROR, result.reason)
+                    await _record(state, eid, progress.STATUS_ERROR, result.reason, progress_path)
                     control_state["errors"] += 1
                     log.error("[%d/%d] ОШИБКА: %s", i + 1, total, result.reason)
 
@@ -358,7 +362,7 @@ async def run(
                         )
                         await smart_sleep(delay, control_state, "Задержка перед следующим")
 
-            log.info(progress.report())
+            log.info(progress.report(progress_path))
             if use_tui:
                 control_state["state"] = "Завершено"
                 await asyncio.sleep(1.0)

@@ -15,26 +15,28 @@ log = logging.getLogger(__name__)
 __all__ = ["get_client", "start", "client_session", "check_self"]
 
 
-def get_client() -> TelegramClient:
+def get_client(account: config.Account | None = None) -> TelegramClient:
     """Возвращает настроенный TelegramClient (ещё не подключённый).
 
-    Бросает RuntimeError, если API_ID/API_HASH не заданы в .env.
+    Если ``account`` не задан — используется основной аккаунт из конфигурации.
+    Бросает RuntimeError, если API_ID/API_HASH не заданы.
     """
-    if not config.has_credentials():
+    acct = account if account is not None else config.get_account(None)
+    if acct is None or not acct.api_id or not acct.api_hash:
         raise RuntimeError(
             "TELEGRAM_API_ID / TELEGRAM_API_HASH не заданы. "
             "Скопируйте .env.example в .env и заполните значения "
             "(получить: https://my.telegram.org)."
         )
     log.info(
-        "Сессия: %s (файл %s.session рядом со скриптом).",
-        config.SESSION_NAME,
-        config.SESSION_NAME,
+        "Сессия аккаунта «%s»: файл %s.session рядом со скриптом.",
+        acct.name,
+        acct.name,
     )
     client = TelegramClient(
-        config.SESSION_PATH,
-        config.API_ID,
-        config.API_HASH,
+        acct.session_path,
+        acct.api_id,
+        acct.api_hash,
     )
     return client
 

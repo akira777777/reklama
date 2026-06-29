@@ -117,3 +117,93 @@ def resolve_media_path() -> str | None:
 def has_credentials() -> bool:
     """True, если API_ID/API_HASH заданы (минимальная проверка перед запуском)."""
     return API_ID != 0 and bool(API_HASH)
+
+
+# --- Мультаккаунт ---
+#
+# Основной аккаунт: TELEGRAM_API_ID / TELEGRAM_API_HASH / SESSION_NAME.
+# Дополнительные: TELEGRAM_API_ID_N / TELEGRAM_API_HASH_N / SESSION_NAME_N (N >= 2).
+# Прогресс и сессия каждого аккаунта хранятся отдельно:
+#   прогресс -> progress_<SESSION_NAME>.json, сессия -> <SESSION_NAME>.session
+
+
+@dataclass(frozen=True)
+class Account:
+    """Один Telegram-аккаунт: креды + пути к сессии и файлу прогресса."""
+
+    name: str
+    api_id: int
+    api_hash: str
+    session_path: str
+    progress_path: str
+
+
+def _env_get(key: str) -> str | None:
+    val = os.getenv(key)
+    return val if val and val.strip() else None
+
+
+def _build_account(name: str, api_id_raw: str, api_hash: str) -> Account | None:
+    try:
+        api_id = int(api_id_raw)
+    except (TypeError, ValueError):
+        return None
+    if api_id == 0 or not api_hash:
+        return None
+    safe_name = name or "reklama"
+    return Account(
+        name=safe_name,
+        api_id=api_id,
+        api_hash=api_hash,
+        session_path=str(BASE_DIR / safe_name),
+        progress_path=str(BASE_DIR / f"progress_{safe_name}.json"),
+    )
+
+
+def load_accounts() -> list[Account]:
+    """Собирает все настроенные аккаунты из переменных окружения (загруженных из .env).
+
+    Порядок: основной аккаунт (без суффикса) первым, затем _2, _3 ...
+    """
+    accounts: list[Account] = []
+    seen: set[str] = set()
+
+    p_id = _env_get("TELEGRAM_API_ID")
+    p_hash = _env_get("TELEGRAM_API_HASH")
+    p_name = _env_get("SESSION_NAME") or "reklama"
+    if p_id and p_hash:
+        acc = _build_account(p_name, p_id, p_hash)
+        if acc and acc.name not in seen:
+            accounts.append(acc)
+            seen.add(acc.name)
+
+    idx = 2
+    while True:
+        sid = _env_get(f"TELEGRAM_API_ID_{idx}")
+        shash = _env_get(f"TELEGRAM_API_HASH_{idx}")
+        if not sid and not shash:
+            break
+        if sid and shash:
+            sname = _env_get(f"SESSION_NAME_{idx}") or f"reklama{idx}"
+            acc = _build_account(sname, sid, shash)
+            if acc and acc.name not in seen:
+                accounts.append(acc)
+                seen.add(acc.name)
+        idx += 1
+        if idx > 100:  # защита от зацикливания
+            break
+
+    return accounts
+
+
+def get_account(name: str | None) -> Account | None:
+    """Возвращает аккаунт по имени (None — основной/первый)."""
+    accounts = load_accounts()
+    if not accounts:
+        return None
+    if name is None:
+        return accounts[0]
+    for acc in accounts:
+        if acc.name == name:
+            return acc
+    return None

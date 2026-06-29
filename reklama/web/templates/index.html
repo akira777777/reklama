@@ -19,9 +19,15 @@
                 <div class="logo-pulse"></div>
                 <h1>reklama <span class="badge">юзербот</span></h1>
             </div>
-            <div id="auth-status-container" class="auth-status-card">
-                <span class="status-dot offline"></span>
-                <span class="status-text">Проверка подключения...</span>
+            <div class="header-right">
+                <div id="account-selector-container" class="account-selector hidden">
+                    <label for="select-account" class="field-label" style="margin-right:6px">Аккаунт:</label>
+                    <select id="select-account" class="text-input" style="width:auto"></select>
+                </div>
+                <div id="auth-status-container" class="auth-status-card">
+                    <span class="status-dot offline"></span>
+                    <span class="status-text">Проверка подключения...</span>
+                </div>
             </div>
         </header>
 
@@ -273,6 +279,32 @@
                                     <button type="button" id="btn-config-save" class="btn primary">Сохранить конфигурацию</button>
                                 </div>
                             </form>
+
+                            <hr class="config-divider">
+
+                            <h3 class="section-subtitle">Аккаунты</h3>
+                            <p class="panel-desc">Управление списком аккаунтов. Активный аккаунт выбирается вверху страницы. Прогресс рассылки у каждого аккаунта отдельный.</p>
+
+                            <div id="accounts-list" class="accounts-list mb-4"></div>
+
+                            <h4 class="section-subtitle" style="font-size:0.95rem">Добавить аккаунт</h4>
+                            <div class="config-grid">
+                                <div class="config-group">
+                                    <label for="new-acc-name" class="field-label">Имя сессии (SESSION_NAME):</label>
+                                    <input type="text" id="new-acc-name" class="text-input" placeholder="например, reklama2">
+                                </div>
+                                <div class="config-group">
+                                    <label for="new-acc-api-id" class="field-label">API ID:</label>
+                                    <input type="text" id="new-acc-api-id" class="text-input" placeholder="api_id">
+                                </div>
+                                <div class="config-group">
+                                    <label for="new-acc-api-hash" class="field-label">API HASH:</label>
+                                    <input type="text" id="new-acc-api-hash" class="text-input" placeholder="api_hash">
+                                </div>
+                            </div>
+                            <div class="flex-row justify-end mt-2">
+                                <button type="button" id="btn-account-add" class="btn success">Добавить аккаунт</button>
+                            </div>
                         </div>
                     </div>
                 </div>

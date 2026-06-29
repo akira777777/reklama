@@ -97,7 +97,10 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
             const data = await apiRequest("/api/status");
             
-            // 1. Update Auth Status Wizard
+            // 0. Update account selector & list
+            updateAccountsUI(data.accounts || [], data.active_account);
+            
+            // 1. Update Auth Status Wizard (active account)
             updateAuthUI(data.auth);
             
             // 2. Update Campaign State & Stats
@@ -109,6 +112,66 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (e) {
             console.error("Error polling status:", e);
         }
+    }
+
+    let currentActiveAccount = null;
+
+    function updateAccountsUI(accounts, activeName) {
+        const select = document.getElementById("select-account");
+        const selectorContainer = document.getElementById("account-selector-container");
+
+        if (!accounts.length) {
+            selectorContainer.classList.add("hidden");
+            document.getElementById("accounts-list").innerHTML = "<p class='panel-desc italic'>Аккаунты не настроены.</p>";
+            return;
+        }
+        selectorContainer.classList.remove("hidden");
+
+        // Перестраиваем select только если изменился состав
+        const names = accounts.map(a => a.name).join(",");
+        if (select.dataset.names !== names) {
+            select.innerHTML = "";
+            accounts.forEach(a => {
+                const opt = document.createElement("option");
+                opt.value = a.name;
+                const statusMark = a.authorized ? "✓" : "✗";
+                opt.textContent = `${statusMark} ${a.name}`;
+                select.appendChild(opt);
+            });
+            select.dataset.names = names;
+        }
+        if (activeName && activeName !== currentActiveAccount) {
+            select.value = activeName;
+            currentActiveAccount = activeName;
+        }
+
+        // Список аккаунтов в настройках
+        const listEl = document.getElementById("accounts-list");
+        listEl.innerHTML = "";
+        accounts.forEach(a => {
+            const row = document.createElement("div");
+            row.className = "account-row";
+            const dotClass = a.authorized ? "online" : "offline";
+            const info = a.account_info;
+            const who = info ? `${info.first_name} (@${info.username || ''})` : "—";
+            const isActive = a.name === activeName;
+            row.innerHTML = `
+                <span class="status-dot ${dotClass}"></span>
+                <span class="account-name"><strong>${a.name}</strong>${isActive ? ' <span class="badge">активен</span>' : ''}</span>
+                <span class="account-who">${who}</span>
+                <button class="btn ${isActive ? 'info' : 'primary'} btn-sm use-account-btn" data-name="${a.name}" ${isActive ? 'disabled' : ''}>Сделать активным</button>
+            `;
+            listEl.appendChild(row);
+        });
+        listEl.querySelectorAll(".use-account-btn").forEach(btn => {
+            btn.addEventListener("click", async () => {
+                try {
+                    await apiRequest("/api/accounts/active", "POST", { name: btn.dataset.name });
+                    appendConsoleLine("SYSTEM", `Активный аккаунт: ${btn.dataset.name}`, "INFO");
+                    pollStatus();
+                } catch (e) { console.error(e); }
+            });
+        });
     }
 
     function updateAuthUI(auth) {
@@ -568,6 +631,39 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     // --- Init & Start Polling ---
+    // Account selector switch
+    const selectAccount = document.getElementById("select-account");
+    selectAccount.addEventListener("change", async () => {
+        try {
+            await apiRequest("/api/accounts/active", "POST", { name: selectAccount.value });
+            appendConsoleLine("SYSTEM", `Активный аккаунт: ${selectAccount.value}`, "INFO");
+            // Сбрасываем визард авторизации при переключении
+            document.getElementById("auth-step-phone").classList.remove("hidden");
+            document.getElementById("auth-step-code").classList.add("hidden");
+            document.getElementById("auth-2fa-container").classList.add("hidden");
+            pollStatus();
+        } catch (e) { console.error(e); }
+    });
+
+    // Add account
+    const btnAccountAdd = document.getElementById("btn-account-add");
+    btnAccountAdd.addEventListener("click", async () => {
+        const name = document.getElementById("new-acc-name").value.trim();
+        const api_id_raw = document.getElementById("new-acc-api-id").value.trim();
+        const api_hash = document.getElementById("new-acc-api-hash").value.trim();
+        if (!api_id_raw || !api_hash) return alert("Укажите API ID и API HASH нового аккаунта.");
+        const api_id = parseInt(api_id_raw, 10);
+        if (!api_id) return alert("API ID должен быть числом.");
+        try {
+            const res = await apiRequest("/api/accounts/add", "POST", { api_id, api_hash, name });
+            appendConsoleLine("SYSTEM", `Аккаунт «${res.name}» добавлен.`, "INFO");
+            document.getElementById("new-acc-name").value = "";
+            document.getElementById("new-acc-api-id").value = "";
+            document.getElementById("new-acc-api-hash").value = "";
+            pollStatus();
+        } catch (e) { console.error(e); }
+    });
+
     loadMessageData();
     loadConfigData();
     pollStatus();
