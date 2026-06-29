@@ -108,6 +108,9 @@ document.addEventListener("DOMContentLoaded", () => {
             
             // 3. Update Group Search State
             updateSearchUI(data.search);
+
+            // 4. Update Rotator State
+            if (data.rotator) updateRotatorUI(data.rotator);
             
         } catch (e) {
             console.error("Error polling status:", e);
@@ -484,6 +487,78 @@ document.addEventListener("DOMContentLoaded", () => {
     btnCampSkip.addEventListener("click", async () => {
         try {
             await apiRequest("/api/campaign/skip-delay", "POST");
+            pollStatus();
+        } catch (e) {
+            console.error(e);
+        }
+    });
+
+    // --- Rotator UI Update ---
+    function updateRotatorUI(rotator) {
+        const btnStart = document.getElementById("btn-rotator-start");
+        const btnStop = document.getElementById("btn-rotator-stop");
+        const card = document.getElementById("rotator-status-card");
+        const statStatus = document.getElementById("rotator-stat-status");
+        const statAccount = document.getElementById("rotator-stat-account");
+        const statCycle = document.getElementById("rotator-stat-cycle");
+        const statCyclesByAccount = document.getElementById("rotator-stat-cycles-by-account");
+
+        if (!btnStart) return; // elements not yet in DOM
+
+        if (rotator.running) {
+            btnStart.classList.add("hidden");
+            btnStop.classList.remove("hidden");
+            card.classList.remove("hidden");
+
+            const statusMap = {
+                "running": "Рассылка идёт...",
+                "switching": "Пауза перед сменой аккаунта...",
+                "stopping": "Завершаем текущий цикл...",
+            };
+            statStatus.textContent = statusMap[rotator.stats.status] || rotator.stats.status || "Работает";
+            statAccount.textContent = rotator.stats.current_account || "—";
+            statCycle.textContent = `#${rotator.stats.cycle_number || 0}`;
+
+            // Build per-account cycles string
+            const byAcc = rotator.stats.cycles_by_account || {};
+            const parts = Object.entries(byAcc).map(([name, count]) => `${name}: ${count}`);
+            statCyclesByAccount.textContent = parts.length ? parts.join(" | ") : "—";
+        } else {
+            btnStart.classList.remove("hidden");
+            btnStop.classList.add("hidden");
+
+            if (rotator.stats.status === "stopped" && rotator.stats.cycle_number > 0) {
+                // Show final state after stop
+                card.classList.remove("hidden");
+                statStatus.textContent = "Ротация остановлена";
+            } else {
+                card.classList.add("hidden");
+            }
+        }
+    }
+
+    // --- Event Handlers: Rotator ---
+    const btnRotatorStart = document.getElementById("btn-rotator-start");
+    const btnRotatorStop = document.getElementById("btn-rotator-stop");
+    const inputRotatorPause = document.getElementById("rotator-pause");
+    const checkRotatorReset = document.getElementById("rotator-reset-each");
+
+    btnRotatorStart.addEventListener("click", async () => {
+        const pause_between_sec = parseInt(inputRotatorPause.value) || 60;
+        const reset_each_cycle = checkRotatorReset.checked;
+        try {
+            const res = await apiRequest("/api/rotator/start", "POST", { pause_between_sec, reset_each_cycle });
+            appendConsoleLine("ROTATOR", `Ротация запущена: ${(res.accounts || []).join(" → ")}`, "INFO");
+            pollStatus();
+        } catch (e) {
+            console.error(e);
+        }
+    });
+
+    btnRotatorStop.addEventListener("click", async () => {
+        try {
+            const res = await apiRequest("/api/rotator/stop", "POST");
+            appendConsoleLine("ROTATOR", res.message || "Сигнал остановки отправлен.", "WARNING");
             pollStatus();
         } catch (e) {
             console.error(e);
