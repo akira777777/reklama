@@ -44,13 +44,13 @@ async def test_get_status_idle(mock_modules):
 @pytest.mark.asyncio
 async def test_get_status_no_credentials(mock_modules, monkeypatch):
     web_mod = mock_modules
-    monkeypatch.setattr(web_mod.config, "API_ID", 0)
-    monkeypatch.setattr(web_mod.config, "API_HASH", "")
+    monkeypatch.setattr(web_mod.config, "load_accounts", lambda: [])
     transport = ASGITransport(app=web_mod.app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get("/api/status")
         data = resp.json()
         assert data["auth"]["status"] == "no_credentials"
+        assert data["accounts"] == []
 
 
 @pytest.mark.asyncio
