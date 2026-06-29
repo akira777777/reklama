@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  # Main application service for running reklama scripts (run.py, search.py, import_message.py)
+  app:
+    build: .
+    image: telegram-reklama:latest
+    container_name: telegram-reklama-app
+    stdin_open: true  # Enables interactive inputs (phone, SMS code, 2FA)
+    tty: true         # Allocates a pseudo-TTY (interactive terminal)
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+
+  # Service to run tests (pytest)
+  test:
+    image: telegram-reklama:latest
+    container_name: telegram-reklama-test
+    volumes:
+      - .:/app
+    command: pytest
+
+  # Service to run code style linting (ruff)
+  lint:
+    image: telegram-reklama:latest
+    container_name: telegram-reklama-lint
+    volumes:
+      - .:/app
+    command: ruff check .
+
+  # Service to run static type checking (mypy)
+  mypy:
+    image: telegram-reklama:latest
+    container_name: telegram-reklama-mypy
+    volumes:
+      - .:/app
+    command: mypy .
