@@ -58,9 +58,16 @@ def detect_media_kind(path: str) -> str:
     return "document"
 
 
-async def send(client: Any, entity: Any, text: str, media_path: str | None) -> SendResult:
+async def send(
+    client: Any,
+    entity: Any,
+    text: str,
+    media_path: str | None,
+    formatting_entities: list[Any] | None = None,
+) -> SendResult:
     """Отправляет сообщение (с медиа или без) и классифицирует результат.
 
+    formatting_entities — напр. кастомные эмодзи (MessageEntityCustomEmoji).
     При FloodWaitError ждёт требуемое время и повторяет отправку один раз.
     """
 
@@ -68,9 +75,17 @@ async def send(client: Any, entity: Any, text: str, media_path: str | None) -> S
         if media_path:
             kind = detect_media_kind(media_path)
             force_document = kind == "document"
-            await client.send_file(entity, media_path, caption=text, force_document=force_document)
+            await client.send_file(
+                entity,
+                media_path,
+                caption=text,
+                force_document=force_document,
+                formatting_entities=formatting_entities,
+            )
         else:
-            await client.send_message(entity, text)
+            await client.send_message(
+                entity, text, formatting_entities=formatting_entities
+            )
 
     try:
         await _do_send()

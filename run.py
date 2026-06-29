@@ -14,6 +14,7 @@ from pathlib import Path
 import auth
 import config
 import dialogs
+import emoji
 import progress
 import sender
 from sender import SendResult
