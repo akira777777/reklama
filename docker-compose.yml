@@ -17,10 +17,10 @@ services:
       resources:
         limits:
           cpus: "2.0"
-          memory: 512M
+          memory: 256M    # measured peak ~80MB; 256M gives 3x headroom for media uploads
         reservations:
           cpus: "0.25"
-          memory: 128M
+          memory: 80M
     logging:
       driver: "json-file"
       options:
@@ -42,7 +42,7 @@ services:
       resources:
         limits:
           cpus: "2.0"
-          memory: 512M
+          memory: 512M    # pytest + asyncio can spike; keep generous
 
   # Service to run code style linting (ruff)
   lint:
@@ -56,7 +56,7 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 256M
+          memory: 128M    # ruff is lightweight
 
   # Service to run static type checking (mypy)
   mypy:
@@ -70,7 +70,7 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 256M
+          memory: 256M    # mypy type inference is memory-hungry on large codebases
 
   # Web interface to control the project
   web:
@@ -92,7 +92,7 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 256M
+          memory: 128M    # measured peak ~63MB; 128M gives 2x headroom
         reservations:
           cpus: "0.1"
           memory: 64M
