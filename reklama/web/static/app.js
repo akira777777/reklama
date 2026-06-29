@@ -157,7 +157,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const isActive = a.name === activeName;
             row.innerHTML = `
                 <span class="status-dot ${dotClass}"></span>
-                <span class="account-name"><strong>${a.name}</strong>${isActive ? ' <span class="badge">активен</span>' : ''}</span>
+                <span class="account-name"><strong>${a.name}</strong>${isActive ? ' <span class="acc-active-badge">активен</span>' : ''}</span>
                 <span class="account-who">${who}</span>
                 <button class="btn ${isActive ? 'info' : 'primary'} btn-sm use-account-btn" data-name="${a.name}" ${isActive ? 'disabled' : ''}>Сделать активным</button>
             `;
