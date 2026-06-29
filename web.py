@@ -198,7 +198,7 @@ async def send_code(req: PhoneRequest):
         return {"ok": True, "message": "Код отправлен успешно"}
     except Exception as e:
         logger.error("Ошибка отправки кода: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @app.post("/api/auth/submit-code")
 async def submit_code(req: CodeRequest):
@@ -222,7 +222,7 @@ async def submit_code(req: CodeRequest):
         return {"ok": True, "username": getattr(me, "username", None) or me.first_name}
     except Exception as e:
         logger.error("Ошибка авторизации по коду: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @app.post("/api/auth/logout")
 async def logout():
@@ -306,7 +306,7 @@ async def update_config(req: ConfigUpdateRequest):
         return {"ok": True}
     except Exception as e:
         logger.error("Ошибка при обновлении .env: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 # --- Эндпоинты управления сообщением и медиа ---
 @app.get("/api/message")
@@ -330,7 +330,7 @@ async def update_message_content(req: MessageUpdateRequest):
         return {"ok": True}
     except Exception as e:
         logger.error("Ошибка сохранения сообщения: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @app.post("/api/message/media")
 async def upload_media_file(file: UploadFile = File(...)):
@@ -351,7 +351,7 @@ async def upload_media_file(file: UploadFile = File(...)):
         return {"ok": True, "filename": file.filename}
     except Exception as e:
         logger.error("Ошибка при сохранении медиафайла: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @app.delete("/api/message/media")
 async def delete_media_file():
@@ -365,7 +365,7 @@ async def delete_media_file():
         return {"ok": True}
     except Exception as e:
         logger.error("Ошибка удаления медиафайлов: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 # --- Эндпоинты управления рассылкой ---
 @app.post("/api/campaign/start")
