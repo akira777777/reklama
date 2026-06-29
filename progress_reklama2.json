@@ -24,6 +24,11 @@
     "status": "sent",
     "ts": 1782738993.4761333
   },
+  "1823102997": {
+    "reason": "text_fallback: ChatSendVideosForbiddenError",
+    "status": "sent",
+    "ts": 1782739099.370891
+  },
   "1955802803": {
     "reason": "with_media",
     "status": "sent",
