@@ -7,8 +7,6 @@ import asyncio
 import copy
 import logging
 import struct
-import sys
-from datetime import datetime
 from pathlib import Path
 
 from telethon.extensions import markdown
@@ -16,30 +14,9 @@ from telethon.tl.types import MessageEntityCustomEmoji
 
 import auth
 import config
+from utils import clean_control_chars, setup_logging
 
 log = logging.getLogger("import_message")
-
-
-def setup_logging() -> Path:
-    """Настраивает логирование в консоль + в logs/import_<timestamp>.log."""
-    logs_dir = config.BASE_DIR / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = logs_dir / f"import_{ts}.log"
-    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-
-    root = logging.getLogger()
-    root.setLevel(logging.INFO)
-    if not root.handlers:
-        sh = logging.StreamHandler(sys.stdout)
-        sh.setFormatter(fmt)
-        if hasattr(sh.stream, "reconfigure"):
-            sh.stream.reconfigure(encoding="utf-8")
-        fh = logging.FileHandler(log_file, encoding="utf-8")
-        fh.setFormatter(fmt)
-        root.addHandler(sh)
-        root.addHandler(fh)
-    return log_file
 
 
 def parse_args() -> argparse.Namespace:
@@ -118,85 +95,84 @@ def prepare_message_for_saving(raw_text: str, entities: list | None) -> tuple[st
     return new_text, new_entities
 
 
-async def run_import() -> None:
+async def _run_import(client, args: argparse.Namespace) -> None:  # noqa: ANN001
+    """Основная логика импорта сообщения."""
+    # Находим сущность чата
+    try:
+        entity = await client.get_entity(args.chat)
+    except Exception as e:  # noqa: BLE001
+        log.error("Не удалось найти чат '%s': %s", args.chat, repr(e))
+        return
+
+    # Находим сообщение
+    if args.message_id:
+        messages = await client.get_messages(entity, ids=args.message_id)
+        message = messages if messages else None
+    else:
+        messages = await client.get_messages(entity, limit=1)
+        message = messages[0] if messages else None
+
+    if not message:
+        log.error("Сообщение не найдено.")
+        return
+
+    log.info("Найдено сообщение (id=%d). Обработка...", message.id)
+
+    # 1. Скачиваем медиа при наличии
+    media_file = None
+    if message.media:
+        media_dir = config.BASE_DIR / "media"
+        if media_dir.exists():
+            log.info("Очищаем папку 'media/' от старых файлов...")
+            for f in media_dir.iterdir():
+                if f.is_file():
+                    try:
+                        f.unlink()
+                    except Exception as e:  # noqa: BLE001
+                        log.warning("Не удалось удалить старый файл %s: %s", f, e)
+        else:
+            media_dir.mkdir(parents=True, exist_ok=True)
+
+        log.info("Скачиваем медиа-файл...")
+        downloaded_path = await message.download_media(file=media_dir)
+        if downloaded_path:
+            media_file = Path(downloaded_path).name
+            log.info("Медиа успешно сохранено: media/%s", media_file)
+        else:
+            log.warning("Медиа найдено, но скачать его не удалось.")
+
+    # 2. Обрабатываем текст и эмодзи
+    raw_text = message.message or ""
+    new_text, new_entities = prepare_message_for_saving(raw_text, message.entities)
+    markdown_text = markdown.unparse(new_text, new_entities)
+
+    # 3. Сохраняем в message.txt
+    message_file_path = config.BASE_DIR / config.MESSAGE_FILE
+    message_file_path.write_text(markdown_text, encoding="utf-8")
+    log.info("Текст успешно сохранен в %s", config.MESSAGE_FILE)
+
+    log.info("=== ИМПОРТ УСПЕШНО ЗАВЕРШЕН ===")
+    log.info("Итоговый текст для отправки:\n---\n%s\n---", clean_control_chars(markdown_text))
+    if media_file:
+        log.info("Итоговое медиа: media/%s", media_file)
+
+
+async def main() -> None:
     args = parse_args()
-    log_file = setup_logging()
+    log_file = setup_logging("import")
     log.info("Лог импорта: %s", log_file)
     log.info("Подключаемся для импорта из чата '%s'...", args.chat)
 
-    client = auth.get_client()
-    await auth.start(client)
+    async with auth.client_session() as client:
+        await _run_import(client, args)
 
+
+def entrypoint() -> None:
     try:
-        # Находим сущность чата
-        try:
-            entity = await client.get_entity(args.chat)
-        except Exception as e:
-            log.error("Не удалось найти чат '%s': %s", args.chat, repr(e))
-            return
-
-        # Находим сообщение
-        if args.message_id:
-            messages = await client.get_messages(entity, ids=args.message_id)
-            message = messages if messages else None
-        else:
-            messages = await client.get_messages(entity, limit=1)
-            message = messages[0] if messages else None
-
-        if not message:
-            log.error("Сообщение не найдено.")
-            return
-
-        log.info("Найдено сообщение (id=%d). Обработка...", message.id)
-
-        # 1. Скачиваем медиа при наличии
-        media_file = None
-        if message.media:
-            media_dir = config.BASE_DIR / "media"
-            if media_dir.exists():
-                log.info("Очищаем папку 'media/' от старых файлов...")
-                for f in media_dir.iterdir():
-                    if f.is_file():
-                        try:
-                            f.unlink()
-                        except Exception as e:
-                            log.warning("Не удалось удалить старый файл %s: %s", f, e)
-            else:
-                media_dir.mkdir(parents=True, exist_ok=True)
-
-            log.info("Скачиваем медиа-файл...")
-            downloaded_path = await message.download_media(file=media_dir)
-            if downloaded_path:
-                media_file = Path(downloaded_path).name
-                log.info("Медиа успешно сохранено: media/%s", media_file)
-            else:
-                log.warning("Медиа найдено, но скачать его не удалось.")
-
-        # 2. Обрабатываем текст и эмодзи
-        raw_text = message.message or ""
-        new_text, new_entities = prepare_message_for_saving(raw_text, message.entities)
-        markdown_text = markdown.unparse(new_text, new_entities)
-
-        # 3. Сохраняем в message.txt
-        message_file_path = config.BASE_DIR / config.MESSAGE_FILE
-        message_file_path.write_text(markdown_text, encoding="utf-8")
-        log.info("Текст успешно сохранен в %s", config.MESSAGE_FILE)
-
-        log.info("=== ИМПОРТ УСПЕШНО ЗАВЕРШЕН ===")
-        log.info("Итоговый текст для отправки:\n---\n%s\n---", markdown_text)
-        if media_file:
-            log.info("Итоговое медиа: media/%s", media_file)
-
-    finally:
-        await client.disconnect()
-
-
-def main() -> None:
-    try:
-        asyncio.run(run_import())
+        asyncio.run(main())
     except KeyboardInterrupt:
         log.warning("Импорт прерван пользователем.")
 
 
 if __name__ == "__main__":
-    main()
+    entrypoint()

@@ -14,6 +14,8 @@ from telethon.tl import types as tl
 
 log = logging.getLogger(__name__)
 
+__all__ = ["is_group", "filter_dialogs", "entity_id", "entity_title", "collect_groups"]
+
 
 def is_group(entity: Any) -> bool:
     """True для базовых групп и супергрупп (megagroup).

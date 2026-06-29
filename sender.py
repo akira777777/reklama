@@ -21,6 +21,8 @@ import progress
 
 log = logging.getLogger(__name__)
 
+__all__ = ["SendResult", "detect_media_kind", "send"]
+
 # Ошибки, при которых чат пропускается (прав нет / slow-mode / нет доступа).
 SKIPPED_ERRORS: tuple[type[Exception], ...] = (
     ChatWriteForbiddenError,
@@ -89,16 +91,22 @@ async def send(
             entity, text, formatting_entities=formatting_entities
         )
 
-    async def _do_send() -> tuple[str, str]:
+    async def _try_send() -> tuple[str, str]:
+        """Одна попытка отправки; не ловит FloodWaitError и SKIPPED_ERRORS."""
         if media_path:
             try:
                 await _send_media()
                 return progress.STATUS_SENT, "with_media"
-            except (FloodWaitError, SlowModeWaitError, ChatWriteForbiddenError, UserBannedInChannelError, ChannelPrivateError) as e:
-                # Специальные ошибки пропускаем выше для внешней обработки
-                raise e
-            except Exception as e:
-                log.warning("Ошибка отправки медиа в %s (%s). Пробуем отправить только текст.", entity, repr(e))
+            except SKIPPED_ERRORS:
+                raise
+            except FloodWaitError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                log.warning(
+                    "Ошибка отправки медиа в %s (%s). Пробуем отправить только текст.",
+                    entity,
+                    repr(e),
+                )
                 await _send_text()
                 return progress.STATUS_SENT, f"text_fallback: {type(e).__name__}"
         else:
@@ -108,7 +116,7 @@ async def send(
     attempts = 0
     while True:
         try:
-            status, reason = await _do_send()
+            status, reason = await _try_send()
             if attempts > 0:
                 reason = f"{reason}_after_floodwait"
             return SendResult(status, reason)

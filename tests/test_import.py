@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from telethon.tl.types import MessageEntityBold, MessageEntityCustomEmoji, MessageEntityItalic
+from telethon.tl.types import MessageEntityBold, MessageEntityCustomEmoji
+
 from import_message import prepare_message_for_saving
 
 

@@ -9,7 +9,6 @@ import random
 import re
 import sys
 from datetime import datetime
-from pathlib import Path
 
 import auth
 import config
@@ -18,8 +17,10 @@ import emoji
 import progress
 import sender
 from sender import SendResult
+from utils import setup_logging
 
 log = logging.getLogger("run")
+
 
 # Управляющие символы в названиях чатов (задаются админами групп) — нейтрализуем
 # для защиты логов/терминала от инъекций (CWE-117).
@@ -50,31 +51,6 @@ async def _record(state: dict, eid: int, status: str, reason: str) -> None:
     """Обновляет состояние в памяти и асинхронно (без блокировки цикла) пишет файл."""
     progress.apply(state, eid, status, reason)
     await asyncio.to_thread(progress.save, state)
-
-
-def setup_logging() -> Path:
-    """Настраивает логирование в консоль + в logs/<timestamp>.log. Возвращает путь лога."""
-    logs_dir = config.BASE_DIR / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = logs_dir / f"{ts}.log"
-    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-
-    root = logging.getLogger()
-    root.setLevel(logging.INFO)
-    # Не дублируем хендлеры при повторном вызове.
-    if not root.handlers:
-        sh = logging.StreamHandler(sys.stdout)
-        sh.setFormatter(fmt)
-        # Используем UTF-8 для корректного отображения Unicode в консоли
-        if hasattr(sh.stream, 'reconfigure'):
-            # Python 3.7+: можно переконфигурировать поток
-            sh.stream.reconfigure(encoding='utf-8')
-        fh = logging.FileHandler(log_file, encoding="utf-8")
-        fh.setFormatter(fmt)
-        root.addHandler(sh)
-        root.addHandler(fh)
-    return log_file
 
 
 def parse_args() -> argparse.Namespace:
@@ -142,7 +118,7 @@ async def ensure_active(window: config.ActiveWindow | None) -> None:
 
 async def run() -> None:
     args = parse_args()
-    log_file = setup_logging()
+    log_file = setup_logging("run")
     log.info("Лог запуска: %s", log_file)
 
     if args.reset_progress:
@@ -159,9 +135,7 @@ async def run() -> None:
     if window:
         log.info("Окно активности: %s", config.ACTIVE_HOURS)
 
-    client = auth.get_client()
-    await auth.start(client)
-    try:
+    async with auth.client_session() as client:
         groups = await dialogs.collect_groups(client)
         if args.limit is not None:
             groups = groups[: args.limit]
@@ -178,14 +152,13 @@ async def run() -> None:
             sample_resolved = resolve_spintax(text_template)
             sample_clean, _ = emoji.parse_custom_emoji(sample_resolved)
             log.info("Пример сообщения после spintax:\n---\n%s\n---", sample_clean)
-            resume = []
-            for eid, title, _entity in groups:
-                if progress.should_skip_state(state, eid):
-                    resume.append((eid, title))
+            skipped_count = sum(
+                1 for eid, _title, _entity in groups if progress.should_skip_state(state, eid)
+            )
             for eid, title, _entity in groups:
                 flag = " [уже отправлено]" if progress.should_skip_state(state, eid) else ""
                 log.info("  - %s (id=%d)%s", _clean(title), eid, flag)
-            log.info("Будет пропущено (resume): %d из %d.", len(resume), total)
+            log.info("Будет пропущено (resume): %d из %d.", skipped_count, total)
             return
 
         done = 0
@@ -210,9 +183,12 @@ async def run() -> None:
                 await _record(state, eid, progress.STATUS_SENT, result.reason)
                 extra = f" ({result.reason})" if result.reason else ""
                 log.info("[%d/%d] ОТПРАВЛЕНО%s.", i + 1, total, extra)
-                if "after_floodwait" in result.reason or "FloodWait" in result.reason:
+                if "after_floodwait" in result.reason:
                     delay_multiplier = min(4.0, delay_multiplier * 1.5)
-                    log.info("Множитель задержек увеличен до %.2fx из-за FloodWait", delay_multiplier)
+                    log.info(
+                        "Множитель задержек увеличен до %.2fx из-за FloodWait",
+                        delay_multiplier,
+                    )
                 else:
                     if delay_multiplier > 1.0:
                         delay_multiplier = max(1.0, delay_multiplier - 0.1)
@@ -222,7 +198,10 @@ async def run() -> None:
                 log.warning("[%d/%d] ПРОПУСК: %s", i + 1, total, result.reason)
                 if "FloodWait" in result.reason:
                     delay_multiplier = min(4.0, delay_multiplier * 2.0)
-                    log.info("Множитель задержек увеличен до %.2fx из-за FloodWait при пропуске", delay_multiplier)
+                    log.info(
+                        "Множитель задержек увеличен до %.2fx из-за FloodWait при пропуске",
+                        delay_multiplier,
+                    )
             else:
                 await _record(state, eid, progress.STATUS_ERROR, result.reason)
                 log.error("[%d/%d] ОШИБКА: %s", i + 1, total, result.reason)
@@ -258,8 +237,6 @@ async def run() -> None:
                     await asyncio.sleep(delay)
 
         log.info(progress.report())
-    finally:
-        await client.disconnect()
 
 
 def main() -> None:

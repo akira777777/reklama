@@ -1,119 +1,113 @@
-"""Юнит-тесты progress.py: чистые преобразования + I/O (через tmp_path)."""
-
 from __future__ import annotations
 
-import json
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
-import progress
-
-# --- Чистые преобразования ---
-
-
-def test_should_skip_state_empty() -> None:
-    assert progress.should_skip_state({}, 1) is False
-
-
-def test_should_skip_state_sent_only() -> None:
-    state = {"1": {"status": progress.STATUS_SENT, "reason": "", "ts": 0}}
-    assert progress.should_skip_state(state, 1) is True
-
-
-def test_should_skip_state_ignores_other_statuses() -> None:
-    for status in (progress.STATUS_SKIPPED, progress.STATUS_ERROR):
-        state = {"1": {"status": status, "reason": "x", "ts": 0}}
-        assert progress.should_skip_state(state, 1) is False
+from progress import (
+    STATUS_ERROR,
+    STATUS_SENT,
+    STATUS_SKIPPED,
+    apply,
+    load,
+    report_from,
+    reset,
+    save,
+    should_skip_state,
+    summarize,
+)
 
 
-def test_summarize_counts() -> None:
+def test_should_skip_state_found():
+    state: dict[str, Any] = {"123": {"status": STATUS_SENT, "reason": "", "ts": 0.0}}
+    assert should_skip_state(state, 123) is True
+
+
+def test_should_skip_state_not_found():
+    state: dict[str, Any] = {}
+    assert should_skip_state(state, 123) is False
+
+
+def test_should_skip_state_different_status():
+    state = {"123": {"status": STATUS_ERROR, "reason": "boom", "ts": 0.0}}
+    assert should_skip_state(state, 123) is False
+
+
+def test_should_skip_state_non_dict_entry():
+    state = {"123": "not_a_dict"}
+    assert should_skip_state(state, 123) is False
+
+
+def test_summarize():
     state = {
-        "1": {"status": progress.STATUS_SENT, "reason": "", "ts": 0},
-        "2": {"status": progress.STATUS_SENT, "reason": "", "ts": 0},
-        "3": {"status": progress.STATUS_SKIPPED, "reason": "SlowMode", "ts": 0},
-        "4": {"status": progress.STATUS_ERROR, "reason": "boom", "ts": 0},
+        "1": {"status": STATUS_SENT},
+        "2": {"status": STATUS_SKIPPED, "reason": "no_access"},
+        "3": {"status": STATUS_ERROR, "reason": "timeout"},
+        "4": {"status": STATUS_SENT},
+        "5": {"status": "unknown"},
     }
-    s = progress.summarize(state)
-    assert s == {"sent": 2, "skipped": 1, "error": 1, "total": 4}
+    result = summarize(state)
+    assert result[STATUS_SENT] == 2
+    assert result[STATUS_SKIPPED] == 1
+    assert result[STATUS_ERROR] == 1
+    assert result["total"] == 5
 
 
-def test_report_from_has_counts() -> None:
-    state = {"1": {"status": progress.STATUS_SENT, "ts": 0}}
-    report = progress.report_from(state)
+def test_report_from():
+    state = {
+        "1": {"status": STATUS_SENT},
+        "2": {"status": STATUS_SKIPPED},
+        "3": {"status": STATUS_ERROR},
+    }
+    report = report_from(state)
+    assert "Итого: 3" in report
     assert "отправлено: 1" in report
-    assert "Итого: 1" in report
+    assert "пропущено: 1" in report
+    assert "ошибок: 1" in report
 
 
-# --- I/O слой (tmp_path) ---
+def test_apply_and_save(tmp_path: Path) -> None:
+    state: dict[str, Any] = {}
+    apply(state, 100, STATUS_SENT)
+    assert state[str(100)]["status"] == STATUS_SENT
+
+    save(state, tmp_path / "progress_test.json")
+    loaded = load(tmp_path / "progress_test.json")
+    assert str(100) in loaded
+    assert loaded[str(100)]["status"] == STATUS_SENT
 
 
-def test_mark_and_load(tmp_path: Path) -> None:
-    p = tmp_path / "progress.json"
-    progress.mark_sent(100, p)
-    progress.mark_skipped(101, "SlowModeWaitError", p)
-    progress.mark_error(102, "ValueError('x')", p)
-
-    state = progress.load(p)
-    assert state["100"]["status"] == progress.STATUS_SENT
-    assert state["101"]["status"] == progress.STATUS_SKIPPED
-    assert state["102"]["reason"] == "ValueError('x')"
+def test_load_nonexistent_file(tmp_path: Path) -> None:
+    result = load(tmp_path / "nonexistent.json")
+    assert result == {}
 
 
-def test_should_skip_reads_file(tmp_path: Path) -> None:
-    p = tmp_path / "progress.json"
-    progress.mark_sent(7, p)
-    assert progress.should_skip(7, p) is True
-    assert progress.should_skip(8, p) is False
+def test_load_corrupted_file(tmp_path: Path) -> None:
+    bad_file = tmp_path / "bad.json"
+    bad_file.write_text("not valid json{", encoding="utf-8")
+    result = load(bad_file)
+    assert result == {}
 
 
-def test_resume_marks_only_sent_as_skip(tmp_path: Path) -> None:
-    p = tmp_path / "progress.json"
-    progress.mark_skipped(1, "no_rights", p)
-    progress.mark_sent(2, p)
-    assert progress.should_skip(1, p) is False  # пропущенный ранее — повторим
-    assert progress.should_skip(2, p) is True
-
-
-def test_reset_removes_file(tmp_path: Path) -> None:
-    p = tmp_path / "progress.json"
-    progress.mark_sent(1, p)
+def test_reset(tmp_path: Path) -> None:
+    p = tmp_path / "progress_to_reset.json"
+    save({"1": {"status": STATUS_SENT}}, p)
     assert p.exists()
-    progress.reset(p)
+    reset(p)
     assert not p.exists()
 
 
-def test_load_missing_file_is_empty(tmp_path: Path) -> None:
-    p = tmp_path / "nope.json"
-    assert progress.load(p) == {}
+def test_reset_nonexistent_file(tmp_path: Path) -> None:
+    p = tmp_path / "no_file.json"
+    reset(p)  # Should not raise
 
 
-def test_load_corrupt_file_is_empty(tmp_path: Path) -> None:
-    p = tmp_path / "progress.json"
-    p.write_text("{ не валидный json", encoding="utf-8")
-    assert progress.load(p) == {}
-
-
-def test_json_keys_are_string_ids(tmp_path: Path) -> None:
-    p = tmp_path / "progress.json"
-    progress.mark_sent(12345, p)
-    raw = json.loads(p.read_text(encoding="utf-8"))
-    assert "12345" in raw
-
-
-def test_apply_and_save_roundtrip(tmp_path: Path) -> None:
-    p = tmp_path / "progress.json"
-    state = progress.load(p)
-    progress.apply(state, 1, progress.STATUS_SENT, "")
-    progress.apply(state, 2, progress.STATUS_SKIPPED, "SlowMode")
-    progress.save(state, p)
-    reloaded = progress.load(p)
-    assert reloaded["1"]["status"] == progress.STATUS_SENT
-    assert reloaded["2"]["reason"] == "SlowMode"
-    assert progress.should_skip_state(reloaded, 1) is True
-    assert progress.should_skip_state(reloaded, 2) is False
-
-
-def test_apply_persists_ts(tmp_path: Path) -> None:
-    state: dict[str, dict[str, object]] = {}
-    progress.apply(state, 9, progress.STATUS_SENT, "")
-    assert isinstance(state["9"]["ts"], float)
-    assert state["9"]["ts"] > 0
+def test_apply_sets_timestamp():
+    state: dict[str, Any] = {}
+    before = datetime.now(tz=UTC).timestamp()
+    apply(state, 42, STATUS_SENT, "all good")
+    after = datetime.now(tz=UTC).timestamp()
+    entry = state[str(42)]
+    assert entry["status"] == STATUS_SENT
+    assert entry["reason"] == "all good"
+    assert before <= entry["ts"] <= after

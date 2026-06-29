@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 
 from telethon import TelegramClient
 
 import config
 
 log = logging.getLogger(__name__)
+
+__all__ = ["get_client", "start", "client_session"]
 
 
 def get_client() -> TelegramClient:
@@ -23,7 +27,9 @@ def get_client() -> TelegramClient:
             "(получить: https://my.telegram.org)."
         )
     log.info(
-        "Сессия: %s (файл %s.session рядом со скриптом).", config.SESSION_NAME, config.SESSION_NAME
+        "Сессия: %s (файл %s.session рядом со скриптом).",
+        config.SESSION_NAME,
+        config.SESSION_NAME,
     )
     client = TelegramClient(
         config.SESSION_PATH,
@@ -40,4 +46,20 @@ async def start(client: TelegramClient) -> None:
     """
     await client.start()
     me = await client.get_me()
-    log.info("Вошли как: %s (id=%s).", getattr(me, "username", None) or me.first_name, me.id)
+    log.info(
+        "Вошли как: %s (id=%s).",
+        getattr(me, "username", None) or me.first_name,
+        me.id,
+    )
+
+
+@asynccontextmanager
+async def client_session() -> AsyncGenerator[TelegramClient, None]:
+    """Async context manager: создаёт, подключает и корректно отключает клиента."""
+    client = get_client()
+    await start(client)
+    try:
+        yield client
+    finally:
+        await client.disconnect()
+        log.info("Клиент отключён.")

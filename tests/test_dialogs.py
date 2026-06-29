@@ -1,13 +1,11 @@
-"""Юнит-тесты фильтрации диалогов (без сети, на реальных TLObject-типах Telethon)."""
-
 from __future__ import annotations
 
-from telethon.tl import types as tl
+from telethon.tl.types import Channel, ChannelForbidden, Chat, ChatForbidden, User
 
-import dialogs
+from dialogs import entity_id, entity_title, filter_dialogs, is_group
 
 
-def _chat(id_: int, title: str = "g", **kw: object) -> tl.Chat:
+def _chat(id_: int, title: str = "g", **kw: object) -> Chat:
     base: dict[str, object] = {
         "id": id_,
         "title": title,
@@ -17,62 +15,95 @@ def _chat(id_: int, title: str = "g", **kw: object) -> tl.Chat:
         "version": 0,
     }
     base.update(kw)
-    return tl.Chat(**base)  # type: ignore[arg-type]
+    return Chat(**base)  # type: ignore[arg-type]
 
 
-def _channel(id_: int, title: str = "c", **kw: object) -> tl.Channel:
-    base: dict[str, object] = {"id": id_, "title": title, "photo": None, "date": None}
+def _channel(id_: int, title: str = "c", **kw: object) -> Channel:
+    base: dict[str, object] = {
+        "id": id_,
+        "title": title,
+        "photo": None,
+        "date": None,
+    }
     base.update(kw)
-    return tl.Channel(**base)  # type: ignore[arg-type]
+    return Channel(**base)  # type: ignore[arg-type]
 
 
-def test_basic_chat_is_group() -> None:
-    assert dialogs.is_group(_chat(1, "базовая группа")) is True
+def _chat_forbidden(id_: int, title: str = "g") -> ChatForbidden:
+    return ChatForbidden(id=id_, title=title)
 
 
-def test_megagroup_is_group() -> None:
-    assert dialogs.is_group(_channel(2, "супергруппа", megagroup=True, broadcast=False)) is True
+def _channel_forbidden(id_: int, title: str = "c", access_hash: int = 0) -> ChannelForbidden:
+    return ChannelForbidden(id=id_, access_hash=access_hash, title=title)
 
 
-def test_broadcast_channel_is_not_group() -> None:
-    assert dialogs.is_group(_channel(3, "канал", megagroup=False, broadcast=True)) is False
+def test_is_group_with_basic_chat():
+    chat = _chat(id_=123, title="Test Group")
+    assert is_group(chat) is True
 
 
-def test_left_megagroup_is_not_group() -> None:
-    ch = _channel(4, "покинутая", megagroup=True, broadcast=False, left=True)
-    assert dialogs.is_group(ch) is False
+def test_is_group_with_megagroup():
+    channel = _channel(id_=456, title="Supergroup", megagroup=True)
+    assert is_group(channel) is True
 
 
-def test_user_is_not_group() -> None:
-    assert dialogs.is_group(tl.User(id=5, first_name="Иван")) is False
+def test_is_group_with_broadcast_channel():
+    channel = _channel(id_=789, title="News", megagroup=False, broadcast=True)
+    assert is_group(channel) is False
 
 
-def test_chat_empty_is_not_group() -> None:
-    assert dialogs.is_group(tl.ChatEmpty(id=6)) is False
+def test_is_group_with_left_channel():
+    channel = _channel(id_=101, title="Left Group", megagroup=True, left=True)
+    assert is_group(channel) is False
 
 
-def test_chat_forbidden_is_not_group() -> None:
-    assert dialogs.is_group(tl.ChatForbidden(id=7, title="запр")) is False
+def test_is_group_with_forbidden_chat():
+    forbidden = _chat_forbidden(id_=202)
+    assert is_group(forbidden) is False
 
 
-def test_channel_forbidden_is_not_group() -> None:
-    cf = tl.ChannelForbidden(id=8, access_hash=0, title="запр", megagroup=True)
-    assert dialogs.is_group(cf) is False
+def test_is_group_with_forbidden_channel():
+    forbidden = _channel_forbidden(id_=303)
+    assert is_group(forbidden) is False
 
 
-def test_filter_dialogs_keeps_only_groups() -> None:
-    items = [
-        _chat(1, "g1"),
-        tl.User(id=2, first_name="u"),
-        _channel(3, "mega", megagroup=True),
-        _channel(4, "broadcast", broadcast=True),
-        tl.ChatEmpty(id=5),
-    ]
-    kept = dialogs.filter_dialogs(items)
-    kept_ids = [dialogs.entity_id(e) for e in kept]
-    assert kept_ids == [1, 3]
+def test_is_group_with_user():
+    user = User(id=404, first_name="John")
+    assert is_group(user) is False
 
 
-def test_entity_title_falls_back_to_id() -> None:
-    assert dialogs.entity_title(tl.ChatEmpty(id=42)) == "id=42"
-    assert dialogs.entity_title(_chat(7, "имя")) == "имя"
+def test_filter_dialogs():
+    chat = _chat(id_=1, title="Group")
+    channel = _channel(id_=2, title="Channel", broadcast=True)
+    megagroup = _channel(id_=3, title="Supergroup", megagroup=True)
+    forbidden = _chat_forbidden(id_=4)
+    dialogs = [chat, channel, megagroup, forbidden]
+    result = filter_dialogs(dialogs)
+    assert len(result) == 2
+    assert chat in result
+    assert megagroup in result
+
+
+def test_entity_id():
+    chat = _chat(id_=999, title="Test")
+    assert entity_id(chat) == 999
+
+
+def test_entity_id_default():
+    obj = object()
+    assert entity_id(obj) == 0
+
+
+def test_entity_title():
+    chat = _chat(id_=1, title="My Group")
+    assert entity_title(chat) == "My Group"
+
+
+def test_entity_title_fallback():
+    user = User(id=42, first_name="Alice")
+    assert entity_title(user) == "id=42"
+
+
+def test_entity_title_no_title():
+    obj = object()
+    assert entity_title(obj) == "id=0"
