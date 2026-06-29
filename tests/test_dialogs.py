@@ -1,8 +1,21 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+from typing import Any
+
 from telethon.tl.types import Channel, ChannelForbidden, Chat, ChatForbidden, User
 
-from dialogs import entity_id, entity_title, filter_dialogs, is_group
+from dialogs import (
+    collect_groups,
+    entity_id,
+    entity_title,
+    filter_dialogs,
+    is_group,
+)
+
+# ---------------------------------------------------------------------------
+# Factories (re-used from existing tests; included for self-containment)
+# ---------------------------------------------------------------------------
 
 
 def _chat(id_: int, title: str = "g", **kw: object) -> Chat:
@@ -35,6 +48,11 @@ def _chat_forbidden(id_: int, title: str = "g") -> ChatForbidden:
 
 def _channel_forbidden(id_: int, title: str = "c", access_hash: int = 0) -> ChannelForbidden:
     return ChannelForbidden(id=id_, access_hash=access_hash, title=title)
+
+
+# ---------------------------------------------------------------------------
+# is_group / filter_dialogs / entity_id / entity_title (existing)
+# ---------------------------------------------------------------------------
 
 
 def test_is_group_with_basic_chat():
@@ -107,3 +125,110 @@ def test_entity_title_fallback():
 def test_entity_title_no_title():
     obj = object()
     assert entity_title(obj) == "id=0"
+
+
+def test_entity_title_empty_string_falls_back_to_id():
+    """An entity whose .title is an empty string must NOT be displayed verbatim."""
+    chat = _chat(id_=77, title="")
+    assert entity_title(chat) == "id=77"
+
+
+# ---------------------------------------------------------------------------
+# collect_groups()
+# ---------------------------------------------------------------------------
+
+
+class _FakeDialogIterClient:
+    """Async-iterable Telethon stand-in used by collect_groups."""
+
+    def __init__(self, dialogs: list[Any]) -> None:
+        self._dialogs = dialogs
+
+    def __aiter__(self) -> _FakeDialogIterClient:
+        return self
+
+    async def __anext__(self) -> Any:
+        if not self._dialogs:
+            raise StopAsyncIteration
+        return self._dialogs.pop(0)
+
+    async def iter_dialogs(self) -> Any:
+        for d in list(self._dialogs):
+            yield d
+
+
+async def test_collect_groups_returns_groups_with_titles_and_entities():
+    g1 = _chat(id_=1, title="Group One")
+    g2 = _channel(id_=2, title="Group Two", megagroup=True)
+    broadcast = _channel(id_=3, title="Channel", broadcast=True)
+    user = User(id=4, first_name="Alice")
+
+    client = _FakeDialogIterClient(
+        [
+            SimpleNamespace(entity=g1),
+            SimpleNamespace(entity=broadcast),
+            SimpleNamespace(entity=g2),
+            SimpleNamespace(entity=user),
+        ]
+    )
+
+    groups = await collect_groups(client)
+
+    assert len(groups) == 2
+    ids = {g[0] for g in groups}
+    assert ids == {1, 2}
+    titles = {g[1] for g in groups}
+    assert titles == {"Group One", "Group Two"}
+
+
+async def test_collect_groups_dedupes_by_id():
+    """The same logical group surfaced via multiple dialogs → one entry."""
+    g = _chat(id_=99, title="Same Group")
+    client = _FakeDialogIterClient(
+        [
+            SimpleNamespace(entity=g),
+            SimpleNamespace(entity=g),
+            SimpleNamespace(entity=g),
+        ]
+    )
+
+    groups = await collect_groups(client)
+
+    assert len(groups) == 1
+    assert groups[0][0] == 99
+
+
+async def test_collect_groups_empty_returns_empty_list():
+    client = _FakeDialogIterClient([])
+    groups = await collect_groups(client)
+    assert groups == []
+
+
+async def test_collect_groups_skips_left_and_forbidden():
+    """Left megagroups and forbidden chats must be filtered out."""
+    left_group = _channel(id_=1, title="Left", megagroup=True, left=True)
+    forbidden = _chat_forbidden(id_=2)
+    valid = _chat(id_=3, title="Valid")
+    client = _FakeDialogIterClient(
+        [
+            SimpleNamespace(entity=left_group),
+            SimpleNamespace(entity=forbidden),
+            SimpleNamespace(entity=valid),
+        ]
+    )
+
+    groups = await collect_groups(client)
+
+    assert len(groups) == 1
+    assert groups[0][0] == 3
+
+
+async def test_collect_groups_entity_ref_passthrough():
+    """The 3rd tuple element should be the exact same entity object."""
+    ent = _chat(id_=5, title="Entity")
+    client = _FakeDialogIterClient([SimpleNamespace(entity=ent)])
+
+    groups = await collect_groups(client)
+
+    assert len(groups) == 1
+    assert groups[0][2] is ent

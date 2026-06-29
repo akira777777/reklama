@@ -43,7 +43,7 @@ def test_mixed_entities_alignment():
     new_text, new_entities = prepare_message_for_saving(text, entities)
     assert new_text == "Привет [emoji:12345] мир!"
     assert len(new_entities) == 1
-    
+
     # Replacement string "[emoji:12345]" is 13 chars. Original emoji was 1 char.
     # diff = 13 - 1 = 12.
     # The Bold entity was at offset 9 (which is >= 7 + 1).
@@ -65,7 +65,7 @@ def test_mixed_entities_wrapping():
     new_text, new_entities = prepare_message_for_saving(text, entities)
     assert new_text == "Привет [emoji:12345]!"
     assert len(new_entities) == 1
-    
+
     # Bold starts before replacement (0 < 7) and ends after replacement (8 > 7).
     # Its length should grow by diff: 8 + 12 = 20.
     bold = new_entities[0]
@@ -83,9 +83,9 @@ def test_utf16_surrogate_pairs():
         MessageEntityCustomEmoji(offset=2, length=1, document_id=54321),
         MessageEntityBold(offset=2, length=2),
     ]
-    
+
     new_text, new_entities = prepare_message_for_saving(text, entities)
-    
+
     # Replacement tag is "[emoji:54321]" (length 13).
     # diff = 13 - 1 = 12.
     # Bold started at 2 (which is equal to emoji offset).

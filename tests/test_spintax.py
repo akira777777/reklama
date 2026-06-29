@@ -11,7 +11,7 @@ def test_no_spintax():
 def test_simple_spintax():
     options = {"hello", "hi", "hey"}
     spintax = "{hello|hi|hey}"
-    
+
     # Run multiple times to verify randomness and correctness
     results = {resolve_spintax(spintax) for _ in range(50)}
     assert results.issubset(options)
@@ -21,7 +21,7 @@ def test_simple_spintax():
 def test_multiple_spintax_blocks():
     spintax = "{hello|hi} {world|friends}!"
     results = {resolve_spintax(spintax) for _ in range(50)}
-    
+
     expected = {
         "hello world!",
         "hello friends!",
@@ -35,7 +35,7 @@ def test_multiple_spintax_blocks():
 def test_nested_spintax():
     spintax = "Привет, {мир|дорогие {друзья|коллеги}}!"
     results = {resolve_spintax(spintax) for _ in range(50)}
-    
+
     expected = {
         "Привет, мир!",
         "Привет, дорогие друзья!",
