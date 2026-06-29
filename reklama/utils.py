@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from telethon import TelegramClient
 
-import config
+from . import config
 
 log = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ async def managed_telegram_client() -> AsyncGenerator[TelegramClient, None]:
     Создаёт, подключает и корректно отключает клиента.
     При первом запуске — интерактивный логин.
     """
-    import auth
+    from . import auth
 
     client = auth.get_client()
     await auth.start(client)
@@ -70,3 +70,19 @@ async def managed_telegram_client() -> AsyncGenerator[TelegramClient, None]:
     finally:
         await client.disconnect()
         log.info("Клиент отключён.")
+
+
+def mutate_message(text: str) -> str:
+    """Добавляет случайный невидимый хвост из zero-width символов к сообщению.
+
+    Это делает хэш каждого отправленного сообщения уникальным для обхода
+    сигнатурных спам-фильтров Telegram, оставаясь невидимым для пользователей.
+    """
+    import random
+
+    if not config.MUTATE_MESSAGE or not text:
+        return text
+    # Набор невидимых символов: zero-width space, zero-width non-joiner, zero-width joiner, BOM
+    invisible_chars = ["\u200b", "\u200c", "\u200d", "\ufeff"]
+    suffix = "".join(random.choices(invisible_chars, k=random.randint(1, 5)))
+    return text + suffix

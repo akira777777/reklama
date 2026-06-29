@@ -18,21 +18,40 @@ __all__ = ["is_group", "filter_dialogs", "entity_id", "entity_title", "collect_g
 
 
 def is_group(entity: Any) -> bool:
-    """True для базовых групп и супергрупп (megagroup).
+    """True для базовых групп и супергрупп (megagroup), куда разрешена отправка сообщений.
 
     Исключаются: ЛС, каналы-трансляции (broadcast), удалённые/недоступные чаты
-    (ChatForbidden/ChannelForbidden), покинутые супергруппы (left=True).
+    (ChatForbidden/ChannelForbidden), покинутые супергруппы (left=True),
+    а также чаты, в которых у нас нет прав на отправку сообщений.
     """
     if isinstance(entity, tl.ChatForbidden | tl.ChannelForbidden):
         return False
     if isinstance(entity, tl.Chat):  # базовая группа
+        if getattr(entity, "deactivated", False):
+            return False
+        default_banned = getattr(entity, "default_banned_rights", None)
+        if default_banned and getattr(default_banned, "send_messages", False):
+            return False
         return True
     # Супергруппа (megagroup=True); каналы-трансляции и покинутые отбрасываем.
-    return (
+    if (
         isinstance(entity, tl.Channel)
         and getattr(entity, "megagroup", False)
         and not getattr(entity, "left", False)
-    )
+    ):
+        # Проверяем личные ограничения на отправку
+        banned = getattr(entity, "banned_rights", None)
+        if banned and getattr(banned, "send_messages", False):
+            return False
+
+        # Проверяем общие ограничения чата, если мы не админ и не создатель
+        is_admin = getattr(entity, "admin_rights", None) is not None or getattr(entity, "creator", False)
+        if not is_admin:
+            default_banned = getattr(entity, "default_banned_rights", None)
+            if default_banned and getattr(default_banned, "send_messages", False):
+                return False
+        return True
+    return False
 
 
 def filter_dialogs(dialogs: Iterable[Any]) -> list[Any]:

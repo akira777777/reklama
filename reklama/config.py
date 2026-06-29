@@ -14,8 +14,8 @@ from dotenv import load_dotenv
 
 log = logging.getLogger(__name__)
 
-# Каталог проекта (где лежит этот файл).
-BASE_DIR = Path(__file__).resolve().parent
+# Каталог проекта (корень репозитория, на уровень выше этого файла).
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Загружаем .env один раз при импорте модуля.
 load_dotenv(BASE_DIR / ".env")
@@ -63,6 +63,11 @@ BATCH_PAUSE_MAX_SEC: int = _get_int("BATCH_PAUSE_MAX_SEC", 900)
 
 # --- Окно активности (опц.), формат "09:00-21:00". Пусто = без ограничений. ---
 ACTIVE_HOURS: str = _get_str("ACTIVE_HOURS", "")
+
+# --- Умная рассылка и обход лимитов ---
+MUTATE_MESSAGE: bool = _get_bool("MUTATE_MESSAGE", True)
+MAX_SLOWMODE_WAIT_SEC: int = _get_int("MAX_SLOWMODE_WAIT_SEC", 60)
+MAX_FLOODWAIT_ATTEMPTS: int = _get_int("MAX_FLOODWAIT_ATTEMPTS", 5)
 
 
 @dataclass(frozen=True)

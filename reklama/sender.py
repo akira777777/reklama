@@ -16,8 +16,8 @@ from telethon.errors import (
     UserBannedInChannelError,
 )
 
-import config
-import progress
+from . import config
+from . import progress
 
 log = logging.getLogger(__name__)
 
