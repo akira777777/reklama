@@ -58,10 +58,10 @@ def parse_args() -> argparse.Namespace:
 
 
 async def import_message_from_saved(client, message_id: int | None = None) -> tuple[str, list | None]:
-    """Import a message from 'me' (Saved Messages) and prepare it for sending.
+    """Импорт сообщения из 'me' (Избранные сообщения) и подготовка к отправке.
     
-    Returns:
-        tuple: (text, formatting_entities)
+    Возвращает:
+        кортеж: (текст, formatting_entities)
     """
     log.info("Importing message from Saved Messages (me)...")
     
@@ -135,51 +135,51 @@ async def import_message_from_saved(client, message_id: int | None = None) -> tu
 
 
 async def send_to_targets(client, text: str, entities: list | None) -> None:
-    """Send the message to target groups."""
-    args = parse_args()  # Re-parse for send-specific args
+    """Отправка сообщения в группы назначения."""
+    args = parse_args()  # Повторный парсинг для аргументов отправки
     
     if args.reset_progress:
         progress.reset()
 
     media = config.resolve_media_path()
     if media:
-        log.info("Media: %s (type: %s)", media, sender.detect_media_kind(media))
+        log.info("Медиа: %s (тип: %s)", media, sender.detect_media_kind(media))
     else:
-        log.info("No media found - text only broadcast.")
+        log.info("Медиа не найдено - рассылка только текстом.")
 
     groups = await dialogs.collect_groups(client)
     if args.limit is not None:
         groups = groups[: args.limit]
     total = len(groups)
-    log.info("Target groups for broadcast: %d.", total)
+    log.info("Группы для рассылки: %d.", total)
     if total == 0:
-        log.warning("No groups found - nothing to send.")
+        log.warning("Группы не найдены - нечего отправлять.")
         return
 
     state = progress.load()
 
     if args.dry_run:
-        log.info("=== DRY RUN ===")
+        log.info("=== ТЕСТОВЫЙ ЗАПУСК ===")
         sample_resolved = resolve_spintax(text)
         sample_clean, _ = emoji.parse_custom_emoji(sample_resolved)
-        log.info("Example message after spintax:\n---\n%s\n---", sample_clean)
+        log.info("Пример сообщения после spintax:\n---\n%s\n---", sample_clean)
         skipped_count = sum(
             1 for eid, _title, _entity in groups if progress.should_skip_state(state, eid)
         )
         for eid, title, _entity in groups:
-            flag = " [already sent]" if progress.should_skip_state(state, eid) else ""
+            flag = " [уже отправлено]" if progress.should_skip_state(state, eid) else ""
             log.info("  - %s (id=%d)%s", title, eid, flag)
-        log.info("Will skip (resume): %d out of %d.", skipped_count, total)
+        log.info("Будет пропущено (resume): %d из %d.", skipped_count, total)
         return
 
     done = 0
     delay_multiplier = 1.0
     for i, (eid, title, entity) in enumerate(groups):
         if progress.should_skip_state(state, eid):
-            log.info("[%d/%d] SKIP (resume): %s", i + 1, total, title)
+            log.info("[%d/%d] ПРОПУСК (resume): %s", i + 1, total, title)
             continue
 
-        log.info("[%d/%d] Sending to: %s (id=%d)", i + 1, total, title, eid)
+        log.info("[%d/%d] Отправка в: %s (id=%d)", i + 1, total, title, eid)
 
         resolved_text = resolve_spintax(text)
         final_text, final_entities = emoji.parse_custom_emoji(resolved_text)
@@ -191,17 +191,17 @@ async def send_to_targets(client, text: str, entities: list | None) -> None:
 
         if result.ok:
             progress.apply(state, eid, progress.STATUS_SENT, result.reason)
-            progress.save(state)  # Synchronous save for simplicity
+            progress.save(state)  # Синхронное сохранение для простоты
             extra = f" ({result.reason})" if result.reason else ""
-            log.info("[%d/%d] SENT%s.", i + 1, total, extra)
+            log.info("[%d/%d] ОТПРАВЛЕНО%s.", i + 1, total, extra)
         elif result.status == progress.STATUS_SKIPPED:
             progress.apply(state, eid, progress.STATUS_SKIPPED, result.reason)
             progress.save(state)
-            log.warning("[%d/%d] SKIP: %s", i + 1, total, result.reason)
+            log.warning("[%d/%d] ПРОПУСК: %s", i + 1, total, result.reason)
         else:
             progress.apply(state, eid, progress.STATUS_ERROR, result.reason)
             progress.save(state)
-            log.error("[%d/%d] ERROR: %s", i + 1, total, result.reason)
+            log.error("[%d/%d] ОШИБКА: %s", i + 1, total, result.reason)
 
         done += 1
         if i != total - 1:
@@ -213,7 +213,7 @@ async def send_to_targets(client, text: str, entities: list | None) -> None:
                 )
                 pause = int(base_pause * delay_multiplier)
                 log.info(
-                    "Batch pause (every %d): %d sec (base %d sec, multiplier %.2fx).",
+                    "Перерыв пакета (каждые %d): %d сек (базовый %d сек, множитель %.2fx).",
                     config.BATCH_SIZE,
                     pause,
                     base_pause,
@@ -228,7 +228,7 @@ async def send_to_targets(client, text: str, entities: list | None) -> None:
                 )
                 delay = int(base_delay * delay_multiplier)
                 log.info(
-                    "Delay before next: %d sec (base %d sec, multiplier %.2fx).",
+                    "Задержка перед следующим: %d сек (базовый %d сек, множитель %.2fx).",
                     delay,
                     base_delay,
                     delay_multiplier,

@@ -1,40 +1,40 @@
-# Forward from Saved Messages
+# Пересылка из Избранного
 
-This script allows you to forward a message from your Saved Messages (me) directly to your target groups while preserving all formatting including Telegram Premium emojis.
+Этот скрипт позволяет переслать сообщение из ваших Избранных сообщений (me) прямо в ваши группы с сохранением всего форматирования, включая премиум-эмодзи Telegram.
 
-## Usage
+## Использование
 
 ```bash
-python scripts/forward_from_saved.py [options]
+python scripts/forward_from_saved.py [опции]
 ```
 
-## Options
+## Опции
 
-- `-id`, `--message-id` - ID of the message in Saved Messages. If not provided, uses the latest message.
-- `--dry-run` - Show target groups without sending.
-- `--limit` - Limit the number of target groups (for testing).
-- `--reset-progress` - Reset progress before sending.
+- `-id`, `--message-id` - ID сообщения в Избранном. Если не указан, используется последнее сообщение.
+- `--dry-run` - Показать группы назначения без отправки.
+- `--limit` - Ограничить количество групп (для тестирования).
+- `--reset-progress` - Сбросить прогресс перед отправкой.
 
-## How it works
+## Как это работает
 
-1. Imports a message from your Saved Messages (`me`)
-2. Processes any premium emojis and formatting
-3. Downloads any media attached to the message
-4. Sends the message to all your configured target groups
+1. Импортирует сообщение из ваших Избранных сообщений (`me`)
+2. Обрабатывает премиум-эмодзи и форматирование
+3. Скачивает любые медиафайлы, прикрепленные к сообщению
+4. Отправляет сообщение во все настроенные группы
 
-## Examples
+## Примеры
 
-Forward the latest message from Saved Messages:
+Переслать последнее сообщение из Избранного:
 ```bash
 python scripts/forward_from_saved.py
 ```
 
-Forward a specific message by ID:
+Переслать конкретное сообщение по ID:
 ```bash
 python scripts/forward_from_saved.py -id 12345
 ```
 
-Test run without actually sending:
+Тестовый запуск без фактической отправки:
 ```bash
 python scripts/forward_from_saved.py --dry-run
 ```
