@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import random
 import sys
 from pathlib import Path
 
@@ -18,8 +19,8 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 from import_message import prepare_message_for_saving
 from reklama import auth, config, dialogs, emoji, progress, sender
 from reklama.sender import SendResult
+from reklama.spintax import resolve_spintax
 from reklama.utils import mutate_message, setup_logging
-from run import resolve_spintax
 
 # Настройка логирования с кодировкой UTF-8 для корректной обработки русских символов
 log = logging.getLogger("forward_from_saved")
@@ -205,7 +206,6 @@ async def send_to_targets(client, text: str, entities: list | None) -> None:
         done += 1
         if i != total - 1:
             if done % config.BATCH_SIZE == 0:
-                import random
                 base_pause = random.randint(
                     min(config.BATCH_PAUSE_MIN_SEC, config.BATCH_PAUSE_MAX_SEC),
                     max(config.BATCH_PAUSE_MIN_SEC, config.BATCH_PAUSE_MAX_SEC),
@@ -220,7 +220,6 @@ async def send_to_targets(client, text: str, entities: list | None) -> None:
                 )
                 await asyncio.sleep(pause)
             else:
-                import random
                 base_delay = random.randint(
                     min(config.DELAY_MIN_SEC, config.DELAY_MAX_SEC),
                     max(config.DELAY_MIN_SEC, config.DELAY_MAX_SEC),

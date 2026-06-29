@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from run import resolve_spintax
+from reklama.spintax import resolve_spintax
 
 
 def test_no_spintax():

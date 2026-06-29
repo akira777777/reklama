@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import logging
 import random
 import re
@@ -11,346 +12,29 @@ import sys
 from datetime import datetime
 from typing import Any
 
-try:
-    import msvcrt
-    _has_msvcrt = True
-except ImportError:
-    _has_msvcrt = False
-    try:
-        import select
-        import termios
-        import tty
-        _has_termios = True
-    except ImportError:
-        _has_termios = False
-
-import contextlib
-
-from rich.align import Align
 from rich.console import Console
 from rich.live import Live
-from rich.panel import Panel
-from rich.progress import ProgressBar
 from rich.table import Table
-from rich.text import Text
 from telethon import TelegramClient
 
 from reklama import auth, config, dialogs, emoji, progress, sender
+from reklama.engine import CampaignEngine
+from reklama.spintax import resolve_spintax
+from reklama.tui import LiveLogHandler, keyboard_listener, make_layout, smart_sleep
 from reklama.utils import mutate_message, setup_logging
 
 log = logging.getLogger("run")
 
 
-# Управляющие символы в названиях чатов (задаются админами групп) — нейтрализуем
-# для защиты логов/терминала от инъекций (CWE-117).
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 
-# Глобальное состояние для управления TUI и логикой прерывания/паузы
-control_state: dict[str, Any] = {
-    "running": True,
-    "paused": False,
-    "skip_delay": False,
-    "state": "Инициализация",
-    "timer_total": 0.0,
-    "timer_remaining": 0.0,
-    "current_group": "Нет",
-    "delay_multiplier": 1.0,
-    "sent": 0,
-    "skipped": 0,
-    "errors": 0,
-    "total": 0,
-    "active_hours": "",
-}
-
-
-class LiveLogHandler(logging.Handler):
-    """Логический хендлер, который собирает последние логи для отображения в TUI."""
-    def __init__(self, max_records=11):
-        super().__init__()
-        self.records = []
-        self.max_records = max_records
-
-    def emit(self, record):
-        try:
-            from reklama.utils import clean_control_chars
-            clean_msg = clean_control_chars(record.getMessage())
-            ts = datetime.now().strftime("%H:%M:%S")
-            
-            if record.levelno >= logging.ERROR:
-                color = "red"
-            elif record.levelno >= logging.WARNING:
-                color = "yellow"
-            elif "ОТПРАВЛЕНО" in clean_msg:
-                color = "green"
-            elif "ПРОПУСК" in clean_msg:
-                color = "yellow"
-            else:
-                color = "white"
-                
-            self.records.append(f"[cyan]{ts}[/] [[{color}]{record.levelname}[/]] {clean_msg}")
-            if len(self.records) > self.max_records:
-                self.records.pop(0)
-        except Exception:
-            self.handleError(record)
-
-
-async def keyboard_listener() -> None:
-    """Асинхронный слушатель клавиатуры для управления паузой, пропуском и выходом."""
-    if not sys.stdin.isatty():
-        return
-
-    if _has_msvcrt:
-        while control_state["running"]:
-            if msvcrt.kbhit():  # type: ignore[attr-defined]
-                try:
-                    ch = msvcrt.getch()  # type: ignore[attr-defined]
-                    if ch in (b'\xe0', b'\x00'):
-                        msvcrt.getch()  # type: ignore[attr-defined]  # сбросить расширенный код
-                        continue
-                    char = ch.decode("utf-8", errors="ignore").lower()
-                    if char in ("p", " "):
-                        control_state["paused"] = not control_state["paused"]
-                    elif char == "s":
-                        control_state["skip_delay"] = True
-                    elif char == "q":
-                        control_state["running"] = False
-                except Exception:
-                    pass
-            await asyncio.sleep(0.05)
-    elif _has_termios:
-        fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)  # type: ignore[attr-defined]
-        try:
-            tty.setraw(fd)  # type: ignore[attr-defined]
-            while control_state["running"]:
-                rlist, _, _ = select.select([sys.stdin], [], [], 0.05)
-                if rlist:
-                    # Имена локальны для этой ветки: termios возвращает str,
-                    # тогда как ветка msvcrt выше использует bytes под тем же именем.
-                    key = sys.stdin.read(1)
-                    key_char = key.lower()
-                    if key_char in ("p", " "):
-                        control_state["paused"] = not control_state["paused"]
-                    elif key_char == "s":
-                        control_state["skip_delay"] = True
-                    elif key_char == "q":
-                        control_state["running"] = False
-                await asyncio.sleep(0.05)
-        except Exception:
-            pass
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)  # type: ignore[attr-defined]
-
-
-async def smart_sleep(duration: float, state_label: str = "Ожидание") -> None:
-    """Умное ожидание, которое обновляет таймер и прерывается по запросу."""
-    if duration <= 0:
-        return
-    control_state["state"] = state_label
-    control_state["timer_total"] = duration
-    control_state["timer_remaining"] = duration
-    
-    step = 0.1
-    elapsed = 0.0
-    while elapsed < duration and control_state["running"]:
-        if control_state["skip_delay"]:
-            control_state["skip_delay"] = False
-            break
-            
-        while control_state["paused"] and control_state["running"]:
-            control_state["state"] = "ПАУЗА"
-            await asyncio.sleep(step)
-            
-        control_state["state"] = state_label
-        await asyncio.sleep(step)
-        elapsed += step
-        control_state["timer_remaining"] = max(0.0, duration - elapsed)
-        
-    control_state["timer_total"] = 0.0
-    control_state["timer_remaining"] = 0.0
-
-
-def make_layout(log_handler: LiveLogHandler) -> Table:
-    """Собирает и возвращает структуру интерфейса (Layout) в виде таблицы rich."""
-    grid = Table.grid(expand=True)
-    grid.add_column()
-    
-    # 1. Заголовок
-    status_text = "[bold green]ЗАПУЩЕН[/]"
-    if not control_state["running"]:
-        status_text = "[bold red]ЗАВЕРШЕНИЕ[/]"
-    elif control_state["paused"]:
-        status_text = "[bold yellow]ПАУЗА[/]"
-    elif "Ожидание" in control_state["state"] or "Перерыв" in control_state["state"]:
-        status_text = "[bold blue]ОЖИДАНИЕ[/]"
-        
-    header_content = Text.assemble(
-        ("Telegram Marketing campaign Orchestrator", "bold cyan"),
-        ("  |  Статус: ", "white"),
-        (status_text, "")
-    )
-    grid.add_row(Panel(Align.center(header_content), border_style="cyan"))
-    
-    # 2. Прогресс-бар
-    done = control_state["sent"] + control_state["skipped"] + control_state["errors"]
-    total = max(1, control_state["total"])
-    pct = (done / total) * 100
-    
-    prog_bar = ProgressBar(total=total, completed=done, width=None)
-    prog_text = f"Прогресс: {pct:.1f}% ({done}/{total})"
-    prog_table = Table.grid(expand=True)
-    prog_table.add_column(ratio=7)
-    prog_table.add_column(ratio=3, justify="right")
-    prog_table.add_row(prog_bar, prog_text)
-    grid.add_row(Panel(prog_table, title="Ход рассылки", border_style="blue"))
-    
-    # 3. Средний блок (Инфо + Статистика)
-    mid_table = Table.grid(expand=True)
-    mid_table.add_column(ratio=5)
-    mid_table.add_column(ratio=5)
-    
-    # Панель статистики
-    stats_table = Table.grid(padding=(0, 1))
-    stats_table.add_column("Параметр", style="cyan")
-    stats_table.add_column("Значение", style="white")
-    stats_table.add_row("Успешно отправлено:", f"[green]{control_state['sent']}[/]")
-    stats_table.add_row("Пропущено (нет прав):", f"[yellow]{control_state['skipped']}[/]")
-    stats_table.add_row("Ошибки отправки:", f"[red]{control_state['errors']}[/]")
-    stats_table.add_row("Всего групп:", str(control_state["total"]))
-    stats_panel = Panel(stats_table, title="Статистика", border_style="blue")
-    
-    # Панель текущего действия
-    action_table = Table.grid(padding=(0, 1))
-    action_table.add_column("Свойство", style="cyan")
-    action_table.add_column("Значение", style="white")
-    
-    grp_title = control_state["current_group"]
-    if len(grp_title) > 28:
-        grp_title = grp_title[:25] + "..."
-        
-    action_table.add_row("Текущая группа:", grp_title)
-    action_table.add_row("Режим работы:", control_state["state"])
-    
-    timer_str = "-"
-    if control_state["timer_remaining"] > 0:
-        timer_str = f"{int(control_state['timer_remaining'])} сек (из {int(control_state['timer_total'])} сек)"
-    action_table.add_row("Таймер задержки:", f"[bold magenta]{timer_str}[/]")
-    action_table.add_row("Множитель задержек:", f"{control_state['delay_multiplier']:.2f}x")
-    action_table.add_row("Окно активности:", control_state["active_hours"] or "Без ограничений")
-    action_panel = Panel(action_table, title="Текущее действие", border_style="blue")
-    
-    mid_table.add_row(stats_panel, action_panel)
-    grid.add_row(mid_table)
-    
-    # 4. Лог-панель
-    log_lines = "\n".join(log_handler.records) if log_handler.records else "Нет событий."
-    grid.add_row(Panel(log_lines, title="Журнал активности (последние события)", border_style="dim white"))
-    
-    # 5. Подсказки
-    footer_text = Text("[Space/P] Пауза/Старт  |  [S] Пропустить задержку  |  [Q] Безопасный выход", justify="center", style="bold yellow")
-    grid.add_row(Panel(footer_text, border_style="dim yellow"))
-    
-    return grid
+engine = CampaignEngine()
+control_state: dict[str, Any] = engine.state
 
 
 def _clean(title: str) -> str:
     return _CONTROL_RE.sub(" ", str(title))
-
-
-class SpintaxNode:
-    def resolve(self) -> str:
-        raise NotImplementedError()
-
-class SpintaxText(SpintaxNode):
-    def __init__(self, text: str):
-        self.text = text
-    def resolve(self) -> str:
-        return self.text
-
-class SpintaxChoice(SpintaxNode):
-    def __init__(self):
-        self.options: list[list[SpintaxNode]] = [[]]
-    def add_to_current(self, node: SpintaxNode):
-        self.options[-1].append(node)
-    def new_option(self):
-        self.options.append([])
-    def resolve(self) -> str:
-        if not self.options or not self.options[0]:
-            return ""
-        chosen = random.choice(self.options)
-        return "".join(node.resolve() for node in chosen)
-
-def resolve_spintax(text: str) -> str:
-    """Разрешает spintax вида {вариант1|вариант2|вариант3}.
-
-    Поддерживает вложенность, например {Привет|Здравствуйте {друг|коллега}}.
-    Поддерживает экранирование символов: \\{, \\}, \\| и самих бэкслешей \\\\.
-    """
-    if not text:
-        return ""
-
-    root: list[SpintaxNode] = []
-    stack: list[SpintaxChoice] = []
-    current_list: list[SpintaxNode] = root
-
-    i = 0
-    n = len(text)
-    current_text: list[str] = []
-
-    def flush_text():
-        if current_text:
-            current_list.append(SpintaxText("".join(current_text)))
-            current_text.clear()
-
-    while i < n:
-        char = text[i]
-        if char == "\\":
-            if i + 1 < n:
-                next_char = text[i+1]
-                if next_char in ("{", "}", "|", "\\"):
-                    current_text.append(next_char)
-                    i += 2
-                    continue
-            current_text.append(char)
-            i += 1
-        elif char == "{":
-            flush_text()
-            node = SpintaxChoice()
-            stack.append(node)
-            current_list = node.options[0]
-            i += 1
-        elif char == "}":
-            flush_text()
-            if stack:
-                node = stack.pop()
-                current_list = stack[-1].options[-1] if stack else root
-                current_list.append(node)
-            else:
-                current_text.append(char)
-            i += 1
-        elif char == "|":
-            flush_text()
-            if stack:
-                stack[-1].new_option()
-                current_list = stack[-1].options[-1]
-            else:
-                current_text.append(char)
-            i += 1
-        else:
-            current_text.append(char)
-            i += 1
-
-    flush_text()
-
-    while stack:
-        node = stack.pop()
-        if stack:
-            stack[-1].options[-1].append(node)
-        else:
-            root.append(node)
-
-    return "".join(node.resolve() for node in root)
 
 
 async def _record(state: dict, eid: int, status: str, reason: str) -> None:
@@ -424,7 +108,7 @@ async def ensure_active(window: config.ActiveWindow | None) -> None:
     while not within_active_window(window) and control_state["running"]:
         wait = max(60, seconds_until_window(window))
         log.warning("Вне окна активности (%s) — ждём %d сек.", config.ACTIVE_HOURS, wait)
-        await smart_sleep(min(wait, 3600), "Ожидание окна активности")
+        await smart_sleep(min(wait, 3600), control_state, "Ожидание окна активности")
 
 
 async def run(
@@ -457,11 +141,7 @@ async def run(
     text_template = read_message()
     media = config.resolve_media_path()
     
-    # Инициализация глобального состояния
-    control_state["active_hours"] = config.ACTIVE_HOURS
-    control_state["running"] = True
-    control_state["paused"] = False
-    control_state["skip_delay"] = False
+    engine.reset(active_hours=config.ACTIVE_HOURS)
     
     window = config.parse_active_hours(config.ACTIVE_HOURS)
     
@@ -486,18 +166,18 @@ async def run(
                 h.setLevel(logging.CRITICAL + 1)
                 
         # Запуск фонового прослушивания клавиатуры
-        listener_task = asyncio.create_task(keyboard_listener())
+        listener_task = asyncio.create_task(keyboard_listener(control_state))
         
         # Создание и запуск Live-экрана rich
         console = Console()
-        live = Live(make_layout(tui_log_handler), console=console, screen=False, auto_refresh=True, refresh_per_second=4)
+        live = Live(make_layout(tui_log_handler, control_state), console=console, screen=False, auto_refresh=True, refresh_per_second=4)
         live.start()
         
         # Фоновый апдейтер экрана
         async def dashboard_updater():
             while control_state["running"]:
                 with contextlib.suppress(Exception):
-                    live.update(make_layout(tui_log_handler))
+                    live.update(make_layout(tui_log_handler, control_state))
                 await asyncio.sleep(0.25)
         updater_task = asyncio.create_task(dashboard_updater())
         
@@ -566,7 +246,7 @@ async def run(
                 log.info("Будет пропущено (resume): %d из %d.", skipped_count, total)
                 if use_tui and control_state["running"]:
                     # Даем пользователю посмотреть на TUI при dry-run, если не было прервано
-                    await smart_sleep(5.0, "DRY RUN Завершен")
+                    await smart_sleep(5.0, control_state, "DRY RUN Завершен")
                 return
 
             done = 0
@@ -663,7 +343,7 @@ async def run(
                             base_pause,
                             delay_multiplier,
                         )
-                        await smart_sleep(pause, "Перерыв пакета")
+                        await smart_sleep(pause, control_state, "Перерыв пакета")
                     else:
                         base_delay = random.randint(
                             min(config.DELAY_MIN_SEC, config.DELAY_MAX_SEC),
@@ -676,7 +356,7 @@ async def run(
                             base_delay,
                             delay_multiplier,
                         )
-                        await smart_sleep(delay, "Задержка перед следующим")
+                        await smart_sleep(delay, control_state, "Задержка перед следующим")
 
             log.info(progress.report())
             if use_tui:
@@ -689,8 +369,7 @@ async def run(
             async with auth.client_session() as new_client:
                 await execute_campaign(new_client)
     finally:
-        # Очистка TUI ресурсов
-        control_state["running"] = False
+        engine.stop()
         if updater_task:
             updater_task.cancel()
         if listener_task:

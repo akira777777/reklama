@@ -24,6 +24,7 @@ log = logging.getLogger("search")
 
 search_state = {
     "running": False,
+    "finished": False,
     "joined_count": 0,
     "total_found": 0,
     "current_group": "Нет",
@@ -504,7 +505,7 @@ async def _run_search(client, args: argparse.Namespace) -> None:  # noqa: ANN001
                 )
                 break
             except Exception as e:
-                log.error("Не удалось вступить в '%s':join: %s", clean_control_chars(t["title"]), repr(e))
+                log.error("Не удалось вступить в '%s': %s", clean_control_chars(t["title"]), repr(e))
 
             if idx < len(to_join):
                 if joined_count > 0 and joined_count % args.join_batch_size == 0:
@@ -530,6 +531,7 @@ async def _run_search(client, args: argparse.Namespace) -> None:  # noqa: ANN001
         search_state["status"] = "Завершено"
     finally:
         search_state["running"] = False
+        search_state["finished"] = True
 
 
 async def main() -> None:

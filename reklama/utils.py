@@ -5,21 +5,13 @@ from __future__ import annotations
 import logging
 import re
 import sys
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from telethon import TelegramClient
 
 from . import config
 
 log = logging.getLogger(__name__)
 
-# Управляющие символы в названиях чатов (задаются админами групп) — нейтрализуем
-# для защиты логов/терминала от инъекций (CWE-117).
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 
@@ -52,24 +44,6 @@ def setup_logging(log_name: str) -> Path:
 def clean_control_chars(title: str) -> str:
     """Удаляет управляющие символы ASCII из строки для безопасного вывода."""
     return _CONTROL_RE.sub(" ", str(title))
-
-
-@asynccontextmanager
-async def managed_telegram_client() -> AsyncGenerator[TelegramClient, None]:
-    """Async context manager для Telethon-клиента.
-
-    Создаёт, подключает и корректно отключает клиента.
-    При первом запуске — интерактивный логин.
-    """
-    from . import auth
-
-    client = auth.get_client()
-    await auth.start(client)
-    try:
-        yield client
-    finally:
-        await client.disconnect()
-        log.info("Клиент отключён.")
 
 
 def mutate_message(text: str) -> str:

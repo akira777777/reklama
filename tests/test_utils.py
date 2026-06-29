@@ -1,18 +1,13 @@
 from __future__ import annotations
 
 import logging
-import sys
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
 
 from reklama import utils
 from reklama.utils import (
     clean_control_chars,
-    managed_telegram_client,
     setup_logging,
 )
 
@@ -178,66 +173,6 @@ def test_setup_logging_writes_log_to_file(tmp_path: Path):
         logging.getLogger().handlers.clear()
         for h in saved:
             logging.getLogger().addHandler(h)
-
-
-# ---------------------------------------------------------------------------
-# managed_telegram_client()
-# ---------------------------------------------------------------------------
-
-
-class _FakeDisconnectClient:
-    def __init__(self) -> None:
-        self.disconnect = AsyncMock()
-        self.disconnect_call_count = 0
-
-    async def _noop(self) -> None:
-        return None
-
-
-def _install_fake_auth(monkeypatch: pytest.MonkeyPatch, fake_client: Any) -> Any:
-    """Install a fake `auth` module so ``managed_telegram_client`` can use it.
-
-    The function imports `auth` locally each invocation, so we have to swap
-    out ``sys.modules['reklama.auth']`` and the package attribute on ``reklama``.
-    """
-    fake_auth = SimpleNamespace(
-        get_client=lambda: fake_client,
-        start=AsyncMock(),
-    )
-    import reklama
-    monkeypatch.setitem(sys.modules, "reklama.auth", fake_auth)
-    monkeypatch.setattr(reklama, "auth", fake_auth, raising=False)
-    return fake_auth
-
-
-async def test_managed_telegram_client_yields_client_and_disconnects(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    fake_client = _FakeDisconnectClient()
-    fake_auth = _install_fake_auth(monkeypatch, fake_client)
-
-    async with managed_telegram_client() as client:
-        assert client is fake_client
-
-    fake_auth.start.assert_awaited_once_with(fake_client)
-    fake_client.disconnect.assert_awaited_once()
-
-
-async def test_managed_telegram_client_disconnects_on_exception(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """Even if the user code raises, the client must still be disconnected."""
-    fake_client = _FakeDisconnectClient()
-    _install_fake_auth(monkeypatch, fake_client)
-
-    class _Boom(RuntimeError):
-        pass
-
-    with pytest.raises(_Boom):
-        async with managed_telegram_client():
-            raise _Boom("kaboom")
-
-    fake_client.disconnect.assert_awaited_once()
 
 
 def test_mutate_message_preserves_emoji_tags(monkeypatch: pytest.MonkeyPatch):

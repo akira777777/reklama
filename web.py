@@ -67,6 +67,7 @@ class WebState:
     search_task: asyncio.Task[None] | None = None
 
 state = WebState()
+media_lock = asyncio.Lock()
 
 async def get_active_client() -> TelegramClient:
     """Возвращает или инициализирует активный TelegramClient."""
@@ -153,19 +154,29 @@ async def get_status():
     else:
         auth_status = "no_credentials"
 
-    # Сбор статуса рассылки
-    campaign_status = "idle"
-    if state.campaign_task and not state.campaign_task.done():
-        campaign_status = "paused" if run.control_state.get("paused") else "running"
-    elif run.control_state.get("state") == "Завершено":
+    campaign_running = state.campaign_task is not None and not state.campaign_task.done()
+    campaign_finished = run.engine.state.get("finished", False)
+    if campaign_running:
+        campaign_status = "paused" if run.engine.state.get("paused") else "running"
+    elif campaign_finished:
         campaign_status = "completed"
+    else:
+        campaign_status = "idle"
 
-    # Сбор статуса поиска
-    search_status = "idle"
-    if state.search_task and not state.search_task.done():
+    search_running = state.search_task is not None and not state.search_task.done()
+    search_finished = search.search_state.get("finished", False)
+    if search_running:
         search_status = "running"
-    elif search.search_state.get("status") == "Завершено":
+    elif search_finished:
         search_status = "completed"
+    else:
+        search_status = "idle"
+
+    campaign_stats = dict(run.engine.state)
+    campaign_stats.pop("finished", None)
+
+    search_stats = dict(search.search_state)
+    search_stats.pop("finished", None)
 
     return {
         "auth": {
@@ -175,13 +186,13 @@ async def get_status():
         },
         "campaign": {
             "status": campaign_status,
-            "running": state.campaign_task is not None and not state.campaign_task.done(),
-            "stats": run.control_state
+            "running": campaign_running,
+            "stats": campaign_stats
         },
         "search": {
             "status": search_status,
-            "running": state.search_task is not None and not state.search_task.done(),
-            "stats": search.search_state
+            "running": search_running,
+            "stats": search_stats
         }
     }
 
@@ -298,12 +309,24 @@ async def update_config(req: ConfigUpdateRequest):
                 
         env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         
-        # Перезагружаем настройки в config-модуле
+        if state.campaign_task and not state.campaign_task.done():
+            raise HTTPException(
+                status_code=409,
+                detail="Нельзя менять конфигурацию во время активной кампании. Остановите кампанию сначала.",
+            )
+        if state.search_task and not state.search_task.done():
+            raise HTTPException(
+                status_code=409,
+                detail="Нельзя менять конфигурацию во время активного поиска. Остановите поиск сначала.",
+            )
+        
         import importlib
         importlib.reload(config)
         
         logger.info("Конфигурация успешно обновлена.")
         return {"ok": True}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Ошибка при обновлении .env: %s", e)
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -334,40 +357,49 @@ async def update_message_content(req: MessageUpdateRequest):
 
 @app.post("/api/message/media")
 async def upload_media_file(file: UploadFile = File(...)):
-    media_dir = config.BASE_DIR / "media"
-    media_dir.mkdir(parents=True, exist_ok=True)
+    if (state.campaign_task and not state.campaign_task.done()) or (state.search_task and not state.search_task.done()):
+        raise HTTPException(status_code=409, detail="Нельзя менять медиа во время активной кампании или поиска.")
     
-    try:
-        # Очищаем старые файлы в media/, так как скрипт выбирает первый попавшийся
-        for item in media_dir.iterdir():
-            if item.is_file():
-                item.unlink()
-                
-        if not file.filename:
-            raise HTTPException(status_code=400, detail="Неверное имя файла.")
-        file_path = media_dir / file.filename
-        with file_path.open("wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-            
-        logger.info("Медиафайл загружен: %s", file.filename)
-        return {"ok": True, "filename": file.filename}
-    except Exception as e:
-        logger.error("Ошибка при сохранении медиафайла: %s", e)
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-@app.delete("/api/message/media")
-async def delete_media_file():
-    media_dir = config.BASE_DIR / "media"
-    try:
-        if media_dir.exists():
+    async with media_lock:
+        media_dir = config.BASE_DIR / "media"
+        media_dir.mkdir(parents=True, exist_ok=True)
+        
+        try:
             for item in media_dir.iterdir():
                 if item.is_file():
                     item.unlink()
-        logger.info("Медиафайлы удалены.")
-        return {"ok": True}
-    except Exception as e:
-        logger.error("Ошибка удаления медиафайлов: %s", e)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+                    
+            if not file.filename:
+                raise HTTPException(status_code=400, detail="Неверное имя файла.")
+            file_path = media_dir / file.filename
+            with file_path.open("wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+                
+            logger.info("Медиафайл загружен: %s", file.filename)
+            return {"ok": True, "filename": file.filename}
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error("Ошибка при сохранении медиафайла: %s", e)
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+@app.delete("/api/message/media")
+async def delete_media_file():
+    if (state.campaign_task and not state.campaign_task.done()) or (state.search_task and not state.search_task.done()):
+        raise HTTPException(status_code=409, detail="Нельзя менять медиа во время активной кампании или поиска.")
+    
+    async with media_lock:
+        media_dir = config.BASE_DIR / "media"
+        try:
+            if media_dir.exists():
+                for item in media_dir.iterdir():
+                    if item.is_file():
+                        item.unlink()
+            logger.info("Медиафайлы удалены.")
+            return {"ok": True}
+        except Exception as e:
+            logger.error("Ошибка удаления медиафайлов: %s", e)
+            raise HTTPException(status_code=500, detail=str(e)) from e
 
 # --- Эндпоинты управления рассылкой ---
 @app.post("/api/campaign/start")
@@ -403,7 +435,7 @@ async def stop_campaign():
     if not state.campaign_task or state.campaign_task.done():
         return {"ok": False, "message": "Кампания не запущена."}
     
-    run.control_state["running"] = False
+    run.engine.stop()
     logger.info("Получен запрос на остановку кампании. Завершаем текущие действия...")
     return {"ok": True}
 
@@ -412,7 +444,7 @@ async def pause_campaign():
     if not state.campaign_task or state.campaign_task.done():
         return {"ok": False, "message": "Кампания не запущена."}
         
-    run.control_state["paused"] = True
+    run.engine.pause()
     logger.info("Рассылка приостановлена.")
     return {"ok": True}
 
@@ -421,7 +453,7 @@ async def resume_campaign():
     if not state.campaign_task or state.campaign_task.done():
         return {"ok": False, "message": "Кампания не запущена."}
         
-    run.control_state["paused"] = False
+    run.engine.resume()
     logger.info("Рассылка возобновлена.")
     return {"ok": True}
 
@@ -430,7 +462,7 @@ async def skip_delay():
     if not state.campaign_task or state.campaign_task.done():
         return {"ok": False, "message": "Кампания не запущена."}
         
-    run.control_state["skip_delay"] = True
+    run.engine.skip_delay()
     logger.info("Пропуск текущего ожидания/задержки.")
     return {"ok": True}
 
