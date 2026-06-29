@@ -17,6 +17,7 @@ from telethon.errors import (
 )
 
 import config
+import progress
 
 log = logging.getLogger(__name__)
 
@@ -33,12 +34,12 @@ SKIPPED_ERRORS: tuple[type[Exception], ...] = (
 class SendResult:
     """Результат отправки в один чат."""
 
-    status: str  # "sent" | "skipped" | "error"
+    status: str  # progress.STATUS_SENT | STATUS_SKIPPED | STATUS_ERROR
     reason: str = ""
 
     @property
     def ok(self) -> bool:
-        return self.status == "sent"
+        return self.status == progress.STATUS_SENT
 
 
 def detect_media_kind(path: str) -> str:
@@ -79,13 +80,19 @@ async def send(client: Any, entity: Any, text: str, media_path: str | None) -> S
         await asyncio.sleep(wait)
         try:
             await _do_send()
-        except SKIPPED_ERRORS as e2:
-            return SendResult("skipped", type(e2).__name__)
-        except Exception as e2:  # noqa: BLE001 — классифицируем всё прочее
-            return SendResult("error", repr(e2))
-        return SendResult("sent", "after_floodwait")
+        except FloodWaitError as e2:
+            # Повторный FloodWait: уважаем требование, ждём и помечаем как пропуск.
+            wait2 = int(getattr(e2, "seconds", 60)) + 5
+            log.warning("Повторный FloodWait: ждём %d сек и пропускаем чат.", wait2)
+            await asyncio.sleep(wait2)
+            return SendResult(progress.STATUS_SKIPPED, "FloodWait")
+        except SKIPPED_ERRORS as e3:
+            return SendResult(progress.STATUS_SKIPPED, type(e3).__name__)
+        except Exception as e3:  # noqa: BLE001 — классифицируем всё прочее
+            return SendResult(progress.STATUS_ERROR, repr(e3))
+        return SendResult(progress.STATUS_SENT, "after_floodwait")
     except SKIPPED_ERRORS as e:
-        return SendResult("skipped", type(e).__name__)
+        return SendResult(progress.STATUS_SKIPPED, type(e).__name__)
     except Exception as e:  # noqa: BLE001 — классифицируем всё прочее
-        return SendResult("error", repr(e))
-    return SendResult("sent")
+        return SendResult(progress.STATUS_ERROR, repr(e))
+    return SendResult(progress.STATUS_SENT)

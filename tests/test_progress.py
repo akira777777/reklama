@@ -97,3 +97,23 @@ def test_json_keys_are_string_ids(tmp_path: Path) -> None:
     progress.mark_sent(12345, p)
     raw = json.loads(p.read_text(encoding="utf-8"))
     assert "12345" in raw
+
+
+def test_apply_and_save_roundtrip(tmp_path: Path) -> None:
+    p = tmp_path / "progress.json"
+    state = progress.load(p)
+    progress.apply(state, 1, progress.STATUS_SENT, "")
+    progress.apply(state, 2, progress.STATUS_SKIPPED, "SlowMode")
+    progress.save(state, p)
+    reloaded = progress.load(p)
+    assert reloaded["1"]["status"] == progress.STATUS_SENT
+    assert reloaded["2"]["reason"] == "SlowMode"
+    assert progress.should_skip_state(reloaded, 1) is True
+    assert progress.should_skip_state(reloaded, 2) is False
+
+
+def test_apply_persists_ts(tmp_path: Path) -> None:
+    state: dict[str, dict[str, object]] = {}
+    progress.apply(state, 9, progress.STATUS_SENT, "")
+    assert isinstance(state["9"]["ts"], float)
+    assert state["9"]["ts"] > 0

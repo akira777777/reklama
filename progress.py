@@ -39,6 +39,8 @@ def summarize(state: dict[str, Any]) -> dict[str, int]:
     """Сводка по статусам: {sent, skipped, error, total}."""
     totals = {STATUS_SENT: 0, STATUS_SKIPPED: 0, STATUS_ERROR: 0}
     for entry in state.values():
+        if not isinstance(entry, dict):
+            continue
         status = entry.get("status")
         if status in totals:
             totals[status] += 1
@@ -81,13 +83,23 @@ def load(path: Path | str | None = None) -> dict[str, Any]:
     return _load_raw(Path(path) if path else DEFAULT_PATH)
 
 
+def apply(state: dict[str, Any], chat_id: int, status: str, reason: str = "") -> None:
+    """Мутирует состояние в памяти: добавляет/обновляет запись чата (без I/O)."""
+    state[str(chat_id)] = {"status": status, "reason": reason, "ts": time.time()}
+
+
+def save(state: dict[str, Any], path: Path | str | None = None) -> None:
+    """Записывает всё состояние в файл одним вызовом."""
+    _save_raw(state, Path(path) if path else DEFAULT_PATH)
+
+
 def mark(
     chat_id: int, status: str, reason: str = "", path: Path | str | None = None
 ) -> dict[str, Any]:
-    """Записывает статус чата и возвращает обновлённое состояние."""
+    """Загружает, обновляет одну запись и сохраняет (load + apply + save). Возвращает состояние."""
     p = Path(path) if path else DEFAULT_PATH
     state = _load_raw(p)
-    state[str(chat_id)] = {"status": status, "reason": reason, "ts": time.time()}
+    apply(state, chat_id, status, reason)
     _save_raw(state, p)
     return state
 

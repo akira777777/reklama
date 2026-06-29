@@ -5,11 +5,14 @@ CLI-флаги (--dry-run, --limit, --reset-progress) сюда не входят
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+log = logging.getLogger(__name__)
 
 # Каталог проекта (где лежит этот файл).
 BASE_DIR = Path(__file__).resolve().parent
@@ -54,7 +57,7 @@ FORCE_DOCUMENT: bool = _get_bool("FORCE_DOCUMENT", False)
 # --- Анти-бан: паузы ---
 DELAY_MIN_SEC: int = _get_int("DELAY_MIN_SEC", 30)
 DELAY_MAX_SEC: int = _get_int("DELAY_MAX_SEC", 90)
-BATCH_SIZE: int = _get_int("BATCH_SIZE", 50)
+BATCH_SIZE: int = max(1, _get_int("BATCH_SIZE", 50))
 BATCH_PAUSE_MIN_SEC: int = _get_int("BATCH_PAUSE_MIN_SEC", 300)
 BATCH_PAUSE_MAX_SEC: int = _get_int("BATCH_PAUSE_MAX_SEC", 900)
 
@@ -92,7 +95,10 @@ def resolve_media_path() -> str | None:
     env_path = os.getenv("MEDIA_PATH")
     if env_path:
         p = Path(env_path)
-        return str(p) if p.is_absolute() else str(BASE_DIR / p)
+        p = p if p.is_absolute() else BASE_DIR / p
+        if p.is_file():
+            return str(p)
+        log.warning("MEDIA_PATH не является файлом: %s", p)
     media_dir = BASE_DIR / "media"
     if not media_dir.is_dir():
         return None

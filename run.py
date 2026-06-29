@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import logging
 import random
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +19,20 @@ import sender
 from sender import SendResult
 
 log = logging.getLogger("run")
+
+# Управляющие символы в названиях чатов (задаются админами групп) — нейтрализуем
+# для защиты логов/терминала от инъекций (CWE-117).
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _clean(title: str) -> str:
+    return _CONTROL_RE.sub(" ", str(title))
+
+
+async def _record(state: dict, eid: int, status: str, reason: str) -> None:
+    """Обновляет состояние в памяти и асинхронно (без блокировки цикла) пишет файл."""
+    progress.apply(state, eid, status, reason)
+    await asyncio.to_thread(progress.save, state)
 
 
 def setup_logging() -> Path:
@@ -145,30 +160,29 @@ async def run() -> None:
                     resume.append((eid, title))
             for eid, title, _entity in groups:
                 flag = " [уже отправлено]" if progress.should_skip_state(state, eid) else ""
-                print(f"  - {title} (id={eid}){flag}")
+                print(f"  - {_clean(title)} (id={eid}){flag}")
             log.info("Будет пропущено (resume): %d из %d.", len(resume), total)
             return
 
         done = 0
         for i, (eid, title, entity) in enumerate(groups):
             if progress.should_skip_state(state, eid):
-                log.info("[%d/%d] ПРОПУСК (resume): %s", i + 1, total, title)
+                log.info("[%d/%d] ПРОПУСК (resume): %s", i + 1, total, _clean(title))
                 continue
 
             await ensure_active(window)
-            log.info("[%d/%d] Отправка в: %s (id=%d)", i + 1, total, title, eid)
+            log.info("[%d/%d] Отправка в: %s (id=%d)", i + 1, total, _clean(title), eid)
             result: SendResult = await sender.send(client, entity, text, media)
 
             if result.ok:
-                progress.mark_sent(eid)
-                state[str(eid)] = {"status": progress.STATUS_SENT, "reason": "", "ts": 0}
+                await _record(state, eid, progress.STATUS_SENT, "")
                 extra = f" ({result.reason})" if result.reason else ""
                 log.info("[%d/%d] ОТПРАВЛЕНО%s.", i + 1, total, extra)
-            elif result.status == "skipped":
-                progress.mark_skipped(eid, result.reason)
+            elif result.status == progress.STATUS_SKIPPED:
+                await _record(state, eid, progress.STATUS_SKIPPED, result.reason)
                 log.warning("[%d/%d] ПРОПУСК: %s", i + 1, total, result.reason)
             else:
-                progress.mark_error(eid, result.reason)
+                await _record(state, eid, progress.STATUS_ERROR, result.reason)
                 log.error("[%d/%d] ОШИБКА: %s", i + 1, total, result.reason)
 
             done += 1
