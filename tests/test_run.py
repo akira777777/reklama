@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from unittest.mock import patch
 
-from config import ActiveWindow
+from reklama.config import ActiveWindow
 from run import _clean, seconds_until_window, within_active_window
 
 

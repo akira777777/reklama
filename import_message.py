@@ -12,9 +12,8 @@ from pathlib import Path
 from telethon.extensions import markdown
 from telethon.tl.types import MessageEntityCustomEmoji
 
-import auth
-import config
-from utils import clean_control_chars, setup_logging
+from reklama import auth, config
+from reklama.utils import clean_control_chars, setup_logging
 
 log = logging.getLogger("import_message")
 

@@ -14,10 +14,8 @@ from telethon.errors import (
 )
 from telethon.tl.functions.help import GetConfigRequest
 
-import config
-import progress
-import sender
-from sender import SendResult, detect_media_kind, send
+from reklama import config, progress, sender
+from reklama.sender import SendResult, detect_media_kind, send
 
 # ---------------------------------------------------------------------------
 # Sync helpers
@@ -54,13 +52,13 @@ def test_detect_media_kind_force_document(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_skipped_errors_includes_expected_types():
-    """Send-loop must skip on these four types — lock the public contract."""
-    from sender import SKIPPED_ERRORS
+    """Send-loop must skip on these three types — lock the public contract."""
+    from reklama.sender import SKIPPED_ERRORS
 
     assert ChatWriteForbiddenError in SKIPPED_ERRORS
     assert UserBannedInChannelError in SKIPPED_ERRORS
     assert ChannelPrivateError in SKIPPED_ERRORS
-    assert SlowModeWaitError in SKIPPED_ERRORS
+    assert SlowModeWaitError not in SKIPPED_ERRORS
 
 
 # ---------------------------------------------------------------------------

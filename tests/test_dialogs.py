@@ -5,7 +5,7 @@ from typing import Any
 
 from telethon.tl.types import Channel, ChannelForbidden, Chat, ChatForbidden, User
 
-from dialogs import (
+from reklama.dialogs import (
     collect_groups,
     entity_id,
     entity_title,

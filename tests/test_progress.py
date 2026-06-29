@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from progress import (
+from reklama.progress import (
     STATUS_ERROR,
     STATUS_SENT,
     STATUS_SKIPPED,

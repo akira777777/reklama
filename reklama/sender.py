@@ -23,12 +23,11 @@ log = logging.getLogger(__name__)
 
 __all__ = ["SendResult", "detect_media_kind", "send"]
 
-# Ошибки, при которых чат пропускается (прав нет / slow-mode / нет доступа).
+# Ошибки, при которых чат пропускается (прав нет / нет доступа).
 SKIPPED_ERRORS: tuple[type[Exception], ...] = (
     ChatWriteForbiddenError,
     UserBannedInChannelError,
     ChannelPrivateError,
-    SlowModeWaitError,
 )
 
 
@@ -123,11 +122,31 @@ async def send(
         except FloodWaitError as e:
             attempts += 1
             wait = int(getattr(e, "seconds", 60)) + 5
-            log.warning("FloodWait (попытка %d из 5): ждём %d сек.", attempts, wait)
+            log.warning(
+                "FloodWait (попытка %d из %d): ждём %d сек.",
+                attempts,
+                config.MAX_FLOODWAIT_ATTEMPTS,
+                wait,
+            )
             await asyncio.sleep(wait)
-            if attempts >= 5:
-                log.error("Превышено число попыток обхода FloodWait (5). Пропускаем чат.")
+            if attempts >= config.MAX_FLOODWAIT_ATTEMPTS:
+                log.error(
+                    "Превышено число попыток обхода FloodWait (%d). Пропускаем чат.",
+                    config.MAX_FLOODWAIT_ATTEMPTS,
+                )
                 return SendResult(progress.STATUS_SKIPPED, "FloodWaitLimitExceeded")
+        except SlowModeWaitError as e:
+            wait = int(getattr(e, "seconds", 10))
+            if wait <= config.MAX_SLOWMODE_WAIT_SEC:
+                log.warning("SlowModeWait: группа требует подождать %d сек. Ждём...", wait)
+                await asyncio.sleep(wait + 1)
+            else:
+                log.warning(
+                    "SlowModeWait слишком большой (%d сек > лимит %d сек). Пропускаем.",
+                    wait,
+                    config.MAX_SLOWMODE_WAIT_SEC,
+                )
+                return SendResult(progress.STATUS_SKIPPED, f"SlowModeWaitError:{wait}")
         except SKIPPED_ERRORS as e:
             return SendResult(progress.STATUS_SKIPPED, type(e).__name__)
         except Exception as e:  # noqa: BLE001 — классифицируем всё прочее

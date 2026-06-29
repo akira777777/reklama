@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from emoji import PLACEHOLDER, parse_custom_emoji
+from reklama.emoji import PLACEHOLDER, parse_custom_emoji
 
 
 def test_no_emoji_markers():

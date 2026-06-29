@@ -10,14 +10,9 @@ import re
 import sys
 from datetime import datetime
 
-import auth
-import config
-import dialogs
-import emoji
-import progress
-import sender
-from sender import SendResult
-from utils import setup_logging
+from reklama import auth, config, dialogs, emoji, progress, sender
+from reklama.sender import SendResult
+from reklama.utils import mutate_message, setup_logging
 
 log = logging.getLogger("run")
 
@@ -136,6 +131,11 @@ async def run() -> None:
         log.info("Окно активности: %s", config.ACTIVE_HOURS)
 
     async with auth.client_session() as client:
+        if not args.dry_run:
+            if not await auth.check_self(client):
+                log.critical("Самопроверка аккаунта не удалась. Завершаем работу во избежание банов.")
+                sys.exit(1)
+
         groups = await dialogs.collect_groups(client)
         if args.limit is not None:
             groups = groups[: args.limit]
@@ -173,6 +173,7 @@ async def run() -> None:
 
             resolved_text = resolve_spintax(text_template)
             final_text, entities = emoji.parse_custom_emoji(resolved_text)
+            final_text = mutate_message(final_text)
             formatting_entities = entities if entities else None
 
             result: SendResult = await sender.send(

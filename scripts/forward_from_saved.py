@@ -12,16 +12,14 @@ import logging
 import sys
 from pathlib import Path
 
-import auth
-import config
-import dialogs
-import emoji
-import progress
-import sender
+# Добавляем корневую директорию проекта в sys.path, чтобы можно было импортировать reklama
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+
+from reklama import auth, config, dialogs, emoji, progress, sender
 from import_message import prepare_message_for_saving
 from run import resolve_spintax
-from sender import SendResult
-from utils import setup_logging
+from reklama.sender import SendResult
+from reklama.utils import mutate_message, setup_logging
 
 # Настройка логирования с кодировкой UTF-8 для корректной обработки русских символов
 log = logging.getLogger("forward_from_saved")
@@ -183,6 +181,7 @@ async def send_to_targets(client, text: str, entities: list | None) -> None:
 
         resolved_text = resolve_spintax(text)
         final_text, final_entities = emoji.parse_custom_emoji(resolved_text)
+        final_text = mutate_message(final_text)
         formatting_entities = final_entities if final_entities else None
 
         result: SendResult = await sender.send(
@@ -244,6 +243,11 @@ async def main() -> None:
     log.info("Forward log: %s", log_file)
 
     async with auth.client_session() as client:
+        if not args.dry_run:
+            if not await auth.check_self(client):
+                log.critical("Самопроверка аккаунта не удалась. Завершаем работу во избежание банов.")
+                sys.exit(1)
+
         # Import message from Saved Messages
         text, entities = await import_message_from_saved(client, args.message_id)
         

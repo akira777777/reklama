@@ -15,8 +15,8 @@ from telethon.errors import ChannelsTooMuchError, FloodWaitError, UsersTooMuchEr
 from telethon.tl import types as tl
 from telethon.tl.functions.channels import JoinChannelRequest
 
-import auth
-from utils import clean_control_chars, setup_logging
+from reklama import auth
+from reklama.utils import clean_control_chars, setup_logging
 
 log = logging.getLogger("search")
 

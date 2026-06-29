@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-import utils
-from utils import (
+from reklama import utils
+from reklama.utils import (
     clean_control_chars,
     managed_telegram_client,
     setup_logging,
@@ -111,7 +111,7 @@ def test_setup_logging_attaches_handlers_when_root_empty(tmp_path: Path):
     logging.getLogger().handlers.clear()
     try:
         # Patch BASE_DIR for this test only.
-        import config as config_module
+        import reklama.config as config_module
 
         original_base = config_module.BASE_DIR
         config_module.BASE_DIR = tmp_path
@@ -135,7 +135,7 @@ def test_setup_logging_is_idempotent(tmp_path: Path):
     saved = list(logging.getLogger().handlers)
     logging.getLogger().handlers.clear()
     try:
-        import config as config_module
+        import reklama.config as config_module
 
         original_base = config_module.BASE_DIR
         config_module.BASE_DIR = tmp_path
@@ -158,7 +158,7 @@ def test_setup_logging_writes_log_to_file(tmp_path: Path):
     saved = list(logging.getLogger().handlers)
     logging.getLogger().handlers.clear()
     try:
-        import config as config_module
+        import reklama.config as config_module
 
         original_base = config_module.BASE_DIR
         config_module.BASE_DIR = tmp_path

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from config import (
+from reklama.config import (
     ActiveWindow,
     has_credentials,
     parse_active_hours,
@@ -75,7 +75,7 @@ def test_resolve_media_path_from_env_not_a_file(
 
 def test_resolve_media_path_from_media_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Point BASE_DIR to tmp_path for this test
-    import config as config_module
+    import reklama.config as config_module
 
     monkeypatch.setattr(config_module, "BASE_DIR", tmp_path)
     media_dir = tmp_path / "media"
@@ -88,7 +88,7 @@ def test_resolve_media_path_from_media_dir(tmp_path: Path, monkeypatch: pytest.M
 
 
 def test_resolve_media_path_no_media_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import config as config_module
+    import reklama.config as config_module
 
     monkeypatch.setattr(config_module, "BASE_DIR", tmp_path)
     result = resolve_media_path()
@@ -98,7 +98,7 @@ def test_resolve_media_path_no_media_dir(tmp_path: Path, monkeypatch: pytest.Mon
 def test_resolve_media_path_empty_media_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import config as config_module
+    import reklama.config as config_module
 
     monkeypatch.setattr(config_module, "BASE_DIR", tmp_path)
     media_dir = tmp_path / "media"
