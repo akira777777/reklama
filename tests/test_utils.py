@@ -55,26 +55,19 @@ def test_clean_control_chars_coerces_non_string():
 
 @pytest.fixture(autouse=True)
 def _drop_non_pytest_root_handlers():
-    """Pytest's logging plugin re-adds its own handler via autouse fixtures
-    that run AFTER ours. We can only control handlers *we* add. Therefore
-    setup_logging's 'first time' branch is exercised via dedicated tests
-    below that isolate from pytest's handler."""
-    # No-op fixture; documented for clarity.
     yield
 
 
 def test_setup_logging_under_pytest_still_returns_valid_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """The return value contract must always hold — even when pytest's logging
-    plugin already populated the root handlers."""
     monkeypatch.setattr(utils.config, "BASE_DIR", tmp_path)
 
     log_file = setup_logging("session")
 
     assert log_file.parent == tmp_path / "logs"
     assert log_file.suffix == ".log"
-    assert log_file.name.startswith("session_")
+    assert log_file.name == "session.log"
 
 
 def test_setup_logging_returns_path_in_correct_directory(
@@ -86,12 +79,9 @@ def test_setup_logging_returns_path_in_correct_directory(
 
 
 def test_setup_logging_filename_format(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """<log_name>_<YYYYMMDD>_<HHMMSS>.log"""
-    import re
-
     monkeypatch.setattr(utils.config, "BASE_DIR", tmp_path)
     log_file = setup_logging("fmt")
-    assert re.match(r"^fmt_\d{8}_\d{6}\.log$", log_file.name), log_file.name
+    assert log_file.name == "fmt.log", log_file.name
 
 
 def test_setup_logging_attaches_handlers_when_root_empty(tmp_path: Path):

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
+import logging.handlers
 import re
 import sys
-from datetime import datetime
 from pathlib import Path
 
 from . import config
@@ -16,25 +16,29 @@ _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 
 def setup_logging(log_name: str) -> Path:
-    """Настраивает логирование в консоль + в logs/<log_name>_<timestamp>.log.
+    """Настраивает логирование в консоль + в logs/<log_name>.log с ротацией.
 
-    Возвращает путь к файлу лога.
+    Использует RotatingFileHandler: файлы до 10MB, хранит последние 5 версий.
+    Возвращает путь к текущему файлу лога.
     """
     logs_dir = config.BASE_DIR / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = logs_dir / f"{log_name}_{ts}.log"
+    log_file = logs_dir / f"{log_name}.log"
     fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
     root = logging.getLogger()
     root.setLevel(logging.INFO)
-    # Не дублируем хендлеры при повторном вызове
     if not root.handlers:
         sh = logging.StreamHandler(sys.stdout)
         sh.setFormatter(fmt)
         if hasattr(sh.stream, "reconfigure"):
             sh.stream.reconfigure(encoding="utf-8")
-        fh = logging.FileHandler(log_file, encoding="utf-8")
+        fh = logging.handlers.RotatingFileHandler(
+            log_file,
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
+        )
         fh.setFormatter(fmt)
         root.addHandler(sh)
         root.addHandler(fh)
