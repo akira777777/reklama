@@ -154,6 +154,56 @@
                                     </div>
                                 </div>
                             </div>
+
+                            <!-- ROTATOR SECTION -->
+                            <div class="rotator-section mt-4">
+                                <div class="rotator-header">
+                                    <span class="rotator-icon">🔄</span>
+                                    <h3 class="rotator-title">Бесконечная ротация аккаунтов</h3>
+                                </div>
+                                <p class="panel-desc" style="margin: 6px 0 12px;">Аккаунты работают поочерёдно: каждый проходит полный цикл, затем передаёт эстафету следующему — и так бесконечно до остановки.</p>
+
+                                <div class="rotator-settings mb-3">
+                                    <div class="flex-col">
+                                        <label for="rotator-pause" class="field-label">Пауза между сменой аккаунтов (сек):</label>
+                                        <input type="number" id="rotator-pause" value="60" min="0" max="3600" class="text-input">
+                                    </div>
+                                    <div class="flex-row items-end">
+                                        <label class="checkbox-container">
+                                            <input type="checkbox" id="rotator-reset-each" checked>
+                                            <span class="checkmark"></span>
+                                            Сбрасывать прогресс каждый цикл
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="control-buttons mb-3">
+                                    <button id="btn-rotator-start" class="btn rotator-btn flex-1">🔄 Запустить ротацию</button>
+                                    <button id="btn-rotator-stop" class="btn danger hidden">⏹ Остановить ротацию</button>
+                                </div>
+
+                                <!-- ROTATOR STATUS CARD -->
+                                <div id="rotator-status-card" class="rotator-monitor-card hidden">
+                                    <div class="rotator-status-header">
+                                        <span class="rotator-pulse"></span>
+                                        <span id="rotator-stat-status" class="rotator-status-text">Инициализация...</span>
+                                    </div>
+                                    <div class="rotator-stats-grid mt-2">
+                                        <div class="detail-row">
+                                            <span class="detail-label">Текущий аккаунт:</span>
+                                            <span id="rotator-stat-account" class="detail-val text-cyan">—</span>
+                                        </div>
+                                        <div class="detail-row">
+                                            <span class="detail-label">Глобальный цикл №:</span>
+                                            <span id="rotator-stat-cycle" class="detail-val text-magenta">0</span>
+                                        </div>
+                                        <div class="detail-row">
+                                            <span class="detail-label">Циклов по аккаунтам:</span>
+                                            <span id="rotator-stat-cycles-by-account" class="detail-val">—</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
                         <!-- TAB: GROUP SEARCH -->

@@ -19,6 +19,7 @@ from telethon.errors import SessionPasswordNeededError
 
 import run
 import search
+from reklama import rotator as rotator_module
 
 # Импортируем модули проекта
 from reklama import auth, config
@@ -66,6 +67,7 @@ class WebState:
     phone_state: dict[str, dict[str, str | None]] = {}  # name -> {phone, code_hash}
     campaign_task: asyncio.Task[None] | None = None
     search_task: asyncio.Task[None] | None = None
+    rotator_task: asyncio.Task[None] | None = None
 
 state = WebState()
 media_lock = asyncio.Lock()
@@ -218,6 +220,9 @@ async def get_status():
     else:
         search_status = "idle"
 
+    rotator_running = state.rotator_task is not None and not state.rotator_task.done()
+    rotator_stats = dict(rotator_module.rotator.state)
+
     campaign_stats = dict(run.engine.state)
     campaign_stats.pop("finished", None)
 
@@ -241,7 +246,11 @@ async def get_status():
             "status": search_status,
             "running": search_running,
             "stats": search_stats
-        }
+        },
+        "rotator": {
+            "running": rotator_running,
+            "stats": rotator_stats,
+        },
     }
 
 
@@ -633,6 +642,76 @@ async def stop_search():
 @app.get("/api/logs")
 async def get_logs():
     return in_memory_log_handler.records
+
+
+# --- Модели для ротатора ---
+class RotatorStartRequest(BaseModel):
+    reset_each_cycle: bool = True
+    pause_between_sec: int = 60
+
+
+# --- Эндпоинты ротации аккаунтов ---
+@app.post("/api/rotator/start")
+async def start_rotator(req: RotatorStartRequest):
+    """Запустить бесконечное чередование всех настроенных аккаунтов."""
+    if state.rotator_task and not state.rotator_task.done():
+        raise HTTPException(status_code=400, detail="Ротация уже запущена.")
+    if state.campaign_task and not state.campaign_task.done():
+        raise HTTPException(status_code=409, detail="Нельзя запустить ротацию во время активной кампании. Остановите её сначала.")
+
+    accounts = config.load_accounts()
+    if len(accounts) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Для ротации нужно минимум 2 аккаунта. Настроено: {len(accounts)}.",
+        )
+
+    # Проверяем авторизацию всех аккаунтов и кэшируем клиентов
+    accounts_with_clients = []
+    for acct in accounts:
+        cl = await _client_for(acct)
+        if not await cl.is_user_authorized():
+            raise HTTPException(
+                status_code=401,
+                detail=f"Аккаунт «{acct.name}» не авторизован. Войдите в него перед запуском ротации.",
+            )
+        accounts_with_clients.append((acct, cl))
+
+    async def rotator_runner():
+        try:
+            logger.info(
+                "Запуск бесконечной ротации: %s",
+                " → ".join(a.name for a, _ in accounts_with_clients),
+            )
+            await rotator_module.rotator.run(
+                accounts_with_clients=accounts_with_clients,
+                reset_each_cycle=req.reset_each_cycle,
+                pause_between_sec=req.pause_between_sec,
+            )
+        except Exception as exc:
+            logger.error("Ошибка во время ротации: %s", exc, exc_info=True)
+        finally:
+            logger.info("Ротация аккаунтов завершена.")
+
+    state.rotator_task = asyncio.create_task(rotator_runner())
+    return {
+        "ok": True,
+        "message": "Ротация запущена",
+        "accounts": [a.name for a, _ in accounts_with_clients],
+    }
+
+
+@app.post("/api/rotator/stop")
+async def stop_rotator():
+    """Остановить ротацию (после завершения текущего цикла)."""
+    if not state.rotator_task or state.rotator_task.done():
+        return {"ok": False, "message": "Ротация не запущена."}
+    rotator_module.rotator.stop()
+    # Также останавливаем текущую кампанию внутри ротации
+    run.engine.stop()
+    logger.info("Получен запрос на остановку ротации.")
+    return {"ok": True, "message": "Сигнал остановки отправлен. Ротация завершится после текущего действия."}
+
 
 # --- Запуск веб-сервера ---
 if __name__ == "__main__":
